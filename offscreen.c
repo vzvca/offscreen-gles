@@ -32,16 +32,19 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <signal.h>
 #include <sys/mman.h>
+#include <sys/time.h>
 #include <fcntl.h>
 #include <unistd.h>
-
-#include <gbm.h>
+#include <errno.h>
+#include <poll.h>
 
 /*
- * EGL headers.
+ * Graphic headers
  */
+#include <gbm.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl31.h>
@@ -56,6 +59,9 @@
 #define DEF_FPS 20
 #define DEF_OUTPUT "/tmp/frame"
 #define DEF_SHADER "shaders/plasma.frag"
+
+#define YUV 1
+#define RGB 0
 
 //--------------------------------------------------------------------------
 //  Vertex Shader source code
@@ -75,15 +81,21 @@ typedef struct image_s image_t;
 //--------------------------------------------------------------------------
 //  Globals
 //--------------------------------------------------------------------------
-int    g_done = 0;
-int    g_width  = DEF_WVID;
-int    g_height = DEF_HVID;
-int    g_mouse_x = 0;
-int    g_mouse_y = 0;
+int          g_done = 0;
+int          g_width  = DEF_WVID;
+int          g_height = DEF_HVID;
+int          g_mouse_x = 0;
+int          g_mouse_y = 0;
+int          g_colorspace = RGB;
 const char*  g_out = DEF_OUTPUT;
-int    g_framerate = DEF_FPS;
 const char*  g_shader = DEF_SHADER;
-image_t g_im, *g_pim = &g_im;
+int          g_fps = DEF_FPS;
+image_t      g_im;
+image_t*     g_pim = &g_im;
+int          g_gbmfd = -1;
+int          g_outfd = -1;
+struct gbm_device*  g_gbm = NULL;
+
 
 static const GLfloat points[] = {
    // front
@@ -92,6 +104,11 @@ static const GLfloat points[] = {
    -1.0f, +1.0f, +1.0f,
    +1.0f, +1.0f, +1.0f
 };
+
+// --------------------------------------------------------------------------
+//   Forward
+// --------------------------------------------------------------------------
+int eval (char* cmd);
 
 // --------------------------------------------------------------------------
 //   Helper func
@@ -112,25 +129,25 @@ int initout( const char *file, int width, int height, image_t *img )
   char *fbp = 0;
   
   // Open the file for reading and writing
-  fbfd = open(file, O_RDWR | O_CREAT, S_IRWXU);
+  fbfd = open (file, O_RDWR | O_CREAT, S_IRWXU);
   if (fbfd == -1) {
-    perror("Error: cannot open output file");
-    exit(1);
+    perror ("Error: cannot open output file");
+    exit (1);
   }
   printf("The output file was opened successfully.\n");
 
   // fill image with 0
-  bzero( block, sizeof(block));
-  ni = nblk(width,height);
+  bzero (block, sizeof(block));
+  ni = nblk (width,height);
   for( i = 0; i < ni; ++i ) {
-    if ( -1 == write( fbfd, block, sizeof(block)) ) {
-      perror("Error: writing output file.");
-      exit(1);
+    if ( -1 == write (fbfd, block, sizeof(block)) ) {
+      perror ("Error: writing output file.");
+      exit (1);
     }
   }
 
   // Map the device to memory
-  fbp = (char *)mmap(0, ni * sizeof(block), PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
+  fbp = (char *) mmap (0, ni * sizeof(block), PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
   if (*(int*)fbp == -1) {
     perror("Error: failed to map output file to memory");
     exit(1);
@@ -149,11 +166,11 @@ int initout( const char *file, int width, int height, image_t *img )
 //   Assertion code
 // --------------------------------------------------------------------------
 void assertOpenGLError(const char* msg) {
-   GLenum error = glGetError();
+   GLenum error = glGetError ();
 
    if (error != GL_NO_ERROR) {
-      fprintf(stderr, "OpenGL error 0x%x %s\n", error, msg);
-      exit(1);
+      fprintf (stderr, "OpenGL error 0x%x %s\n", error, msg);
+      exit (1);
    }
 }
 
@@ -161,11 +178,11 @@ void assertOpenGLError(const char* msg) {
 //   Assertion code
 // --------------------------------------------------------------------------
 void assertEGLError(const char* msg) {
-   EGLint error = eglGetError();
+   EGLint error = eglGetError ();
 
    if (error != EGL_SUCCESS) {
-      fprintf(stderr, "EGL error 0x%x %s\n", error, msg);
-      exit(1);
+      fprintf (stderr, "EGL error 0x%x %s\n", error, msg);
+      exit (1);
    }
 }
 
@@ -174,23 +191,23 @@ void assertEGLError(const char* msg) {
 // --------------------------------------------------------------------------
 GLuint mkshader(GLuint type, const char *src, GLint len)
 {
-   GLuint vsh = glCreateShader(type);
-   assertOpenGLError("glCreateShader");
+   GLuint vsh = glCreateShader (type);
+   assertOpenGLError ("glCreateShader");
 
-   if (len == -1) len = strlen(src);
-   glShaderSource(vsh, 1, (const GLchar **) &src, &len);
-   assertOpenGLError("glShaderSource");
+   if (len == -1) len = strlen (src);
+   glShaderSource (vsh, 1, (const GLchar **) &src, &len);
+   assertOpenGLError ("glShaderSource");
 
-   glCompileShader(vsh);
-   assertOpenGLError("glCompileShader");
+   glCompileShader (vsh);
+   assertOpenGLError ("glCompileShader");
 
    char log[BLKSZ];
-   int  loglen = sizeof(log);
+   int  loglen = sizeof (log);
    log[0] = 0;
-   glGetShaderInfoLog(vsh, sizeof(log), &loglen, log);
+   glGetShaderInfoLog (vsh, sizeof(log), &loglen, log);
    if (loglen) {
-      puts("Shader compilation log:");
-      puts(log);
+      puts ("Shader compilation log:");
+      puts (log);
    }
 
    return vsh;
@@ -199,22 +216,113 @@ GLuint mkshader(GLuint type, const char *src, GLint len)
 // --------------------------------------------------------------------------
 //   Create shader from file content
 // --------------------------------------------------------------------------
-GLuint mkshaderf(GLuint type, const char *fname)
+GLuint mkshaderf (GLuint type, const char *fname)
 {
    GLint len;
    char src[8*BLKSZ];
 
-   FILE *fin = fopen(fname,"r");
+   FILE *fin = fopen (fname,"r");
    if (fin == NULL) {
-      fprintf(stderr, "Can't open file %s\n", fname);
-      exit(1);
+      fprintf (stderr, "Can't open file %s\n", fname);
+      exit (1);
    }
-   len = fread(src, 1, sizeof(src), fin);
-   fclose(fin);
+   len = fread (src, 1, sizeof(src), fin);
+   fclose (fin);
 
-   return mkshader(type, (const char*) src, len);
+   return mkshader (type, (const char*) src, len);
 }
 
+int glinit()
+{
+  return 0;
+}
+
+// --------------------------------------------------------------------------
+//   Wait a few milliseconds keeping an eye on stdin
+// --------------------------------------------------------------------------
+int waitmsec (int msec)
+{
+  struct timeval start, now;
+  struct pollfd fds[1];
+  int diff, ret;
+
+  gettimeofday (&start, NULL);
+  
+  fds[0].fd = fileno(stdin);
+  fds[0].events = POLLIN;
+
+ again:
+  // compute how log time to wait
+  gettimeofday (&now, NULL);
+  diff = ((now.tv_sec - start.tv_sec)*1000000 + (now.tv_usec - start.tv_usec))/1000;
+  msec -= diff;
+  if (msec <= 0) return 0;
+  
+  ret = poll (fds, 1, msec - diff);
+  if (ret > 0) {
+    if (fds[0].revents & POLLIN) {
+      char line[BLKSZ/4], *sline = line;
+      int sz;
+      
+    doread:
+      sz = read (fileno(stdin), sline, sizeof(line) - (sline-line));
+      if (sz == -1) {
+	// read error ! leave
+	perror ("read()");
+	exit (1);
+      }
+      if (sz == 0) {
+	// stdin closed ! leave
+	fprintf (stderr, "stdin closed.\n");
+	exit (1);
+      }
+      else {
+	char *p, *s = line;
+      parse:
+	for (p = s; (p - sline) < sz && *p != '\n'; ++p);
+	if (*p == '\n') {
+	  *p = 0;
+	  eval (s);
+	  ++p;
+	  if (p - sline < sz) {
+	    s = p;
+	    goto parse;
+	  }
+	}
+	else {
+	  // line not complete - read more input or leave
+	  if (s == line) {
+	    fprintf (stderr, "line too long.\n");
+	    exit (1);
+	  }
+	  else {
+	    memcpy (line, s, p-s);
+	    sline = line + (p-s);
+	    goto doread;
+	  }
+	}
+      }
+    }
+    else {
+      // not supposed to happen ! leave
+      fprintf (stderr, "Unexpected poll() result.\n");
+      exit (1);
+    }
+  }
+  else if (ret == -1) {
+    if (errno == EINTR) {
+      if (g_done) return 0;
+      goto again;
+    }
+    else {
+      // treat other errors as fatal
+      perror ("poll()");
+      exit (1);
+    }
+  }
+  return 0;
+}
+  
 // --------------------------------------------------------------------------
 //   GL initialisation and rendering
 // --------------------------------------------------------------------------
@@ -227,45 +335,45 @@ int renderloop(int width, int height) {
    EGLContext context;
    EGLint num_config;
 
-   int32_t fd = open ("/dev/dri/renderD128", O_RDWR);
-   assert (fd > 0);
+   g_gbmfd = open ("/dev/dri/renderD128", O_RDWR);
+   assert (g_gbmfd > 0);
 
-   struct gbm_device *gbm = gbm_create_device (fd);
-   assert (gbm != NULL);
+   g_gbm = gbm_create_device (g_gbmfd);
+   assert (g_gbm != NULL);
 
    /* setup EGL from the GBM device */
-   display = eglGetPlatformDisplay (EGL_PLATFORM_GBM_MESA, gbm, NULL);
+   display = eglGetPlatformDisplay (EGL_PLATFORM_GBM_MESA, g_gbm, NULL);
    //display = eglGetDisplay (EGL_DEFAULT_DISPLAY);
    assert (display != NULL);
-   assertEGLError("eglGetDisplay");
+   assertEGLError ("eglGetDisplay");
 
-   eglInitialize(display, NULL, NULL);
-   assertEGLError("eglInitialize");
+   eglInitialize (display, NULL, NULL);
+   assertEGLError ("eglInitialize");
 
-   eglChooseConfig(display, NULL, &config, 1, &num_config);
-   assertEGLError("eglChooseConfig");
+   eglChooseConfig (display, NULL, &config, 1, &num_config);
+   assertEGLError ("eglChooseConfig");
 
-   eglBindAPI(EGL_OPENGL_ES_API);
-   assertEGLError("eglBindAPI");
+   eglBindAPI (EGL_OPENGL_ES_API);
+   assertEGLError ("eglBindAPI");
 
    static const EGLint attribs[] = {
       EGL_CONTEXT_CLIENT_VERSION, 3,
       EGL_NONE
    };
         
-   context = eglCreateContext(display, config, EGL_NO_CONTEXT, attribs);
-   assertEGLError("eglCreateContext");
+   context = eglCreateContext (display, config, EGL_NO_CONTEXT, attribs);
+   assertEGLError ("eglCreateContext");
 
-   eglMakeCurrent(display, NULL, NULL, context);
-   assertEGLError("eglMakeCurrent");
+   eglMakeCurrent (display, NULL, NULL, context);
+   assertEGLError ("eglMakeCurrent");
 
    /*
     * Create an OpenGL framebuffer as render target.
     */
    GLuint frameBuffer;
-   glGenFramebuffers(1, &frameBuffer);
-   glBindFramebuffer(GL_FRAMEBUFFER, frameBuffer);
-   assertOpenGLError("glBindFramebuffer");
+   glGenFramebuffers (1, &frameBuffer);
+   glBindFramebuffer (GL_FRAMEBUFFER, frameBuffer);
+   assertOpenGLError ("glBindFramebuffer");
 
    /*
     * Create a texture as color attachment.
@@ -273,132 +381,388 @@ int renderloop(int width, int height) {
    GLuint t;
    glGenTextures(1, &t);
 
-   glBindTexture(GL_TEXTURE_2D, t);
-   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-   assertOpenGLError("glTexImage2D");
+   glBindTexture (GL_TEXTURE_2D, t);
+   glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+   assertOpenGLError ("glTexImage2D");
 
-   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
    /*
     * Attach the texture to the framebuffer.
     */
-   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t, 0);
-   assertOpenGLError("glFramebufferTexture2D");
+   glFramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t, 0);
+   assertOpenGLError ("glFramebufferTexture2D");
 
    /*
     * Create VBO
     */
    GLuint vbo = 0;
-   glGenBuffers(1, &vbo);
-   assertOpenGLError("glGenBuffers");
-   glBindBuffer(GL_ARRAY_BUFFER, vbo);
-   assertOpenGLError("glBindBuffer");
-   glBufferData(GL_ARRAY_BUFFER, 12*sizeof(GLfloat), points, GL_STATIC_DRAW);
-   assertOpenGLError("glBufferData");
+   glGenBuffers (1, &vbo);
+   assertOpenGLError ("glGenBuffers");
+   glBindBuffer (GL_ARRAY_BUFFER, vbo);
+   assertOpenGLError ("glBindBuffer");
+   glBufferData (GL_ARRAY_BUFFER, 12*sizeof(GLfloat), points, GL_STATIC_DRAW);
+   assertOpenGLError ("glBufferData");
 
    GLuint vao = 0;
-   glGenVertexArrays(1, &vao);
-   assertOpenGLError("glGenVertexArrays");
-   glBindVertexArray(vao);
-   assertOpenGLError("glBindVertexArray");
-   glEnableVertexAttribArray(0);
-   assertOpenGLError("glEnableVertexArrayAttrib");
-   glBindBuffer(GL_ARRAY_BUFFER, vbo);
-   assertOpenGLError("glBindBuffer");
-   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
-   assertOpenGLError("glVertexAttribPointer");
+   glGenVertexArrays (1, &vao);
+   assertOpenGLError ("glGenVertexArrays");
+   glBindVertexArray (vao);
+   assertOpenGLError ("glBindVertexArray");
+   glEnableVertexAttribArray (0);
+   assertOpenGLError ("glEnableVertexArrayAttrib");
+   glBindBuffer (GL_ARRAY_BUFFER, vbo);
+   assertOpenGLError ("glBindBuffer");
+   glVertexAttribPointer (0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
+   assertOpenGLError ("glVertexAttribPointer");
 
    /*
     * Compile shader
     */
 
-   GLuint vsh = mkshader(GL_VERTEX_SHADER, VERTEX_SHADER_SRC, -1);
-   GLuint fsh = mkshaderf(GL_FRAGMENT_SHADER, g_shader);
+   GLuint vsh = mkshader (GL_VERTEX_SHADER, VERTEX_SHADER_SRC, -1);
+   GLuint fsh = mkshaderf (GL_FRAGMENT_SHADER, g_shader);
 
-   GLuint prog = glCreateProgram();
-   assertOpenGLError("glCreateProgram");
-   glAttachShader(prog, vsh);
-   assertOpenGLError("glAttachShader VS");
-   glAttachShader(prog, fsh);
-   assertOpenGLError("glAttachShader FS");
-   glLinkProgram(prog);
-   assertOpenGLError("glLinkProgram");
-   puts("Program log");
+   GLuint prog = glCreateProgram ();
+   assertOpenGLError ("glCreateProgram");
+   glAttachShader (prog, vsh);
+   assertOpenGLError ("glAttachShader VS");
+   glAttachShader (prog, fsh);
+   assertOpenGLError ("glAttachShader FS");
+   glLinkProgram (prog);
+   assertOpenGLError ("glLinkProgram");
+   puts ("Program log");
    char msg[2048] = {0};
    int msglen;
-   glGetProgramInfoLog(prog, sizeof(msg), &msglen, msg);
-   puts(msg);
+   glGetProgramInfoLog (prog, sizeof(msg), &msglen, msg);
+   puts (msg);
 
-   glUseProgram(prog);
-   assertOpenGLError("glUseProgram");
+   glUseProgram (prog);
+   assertOpenGLError ("glUseProgram");
 
    /*
     * Bind uniforms
     */
-   GLint u_time = glGetUniformLocation(prog, "time");
-   GLint u_mouse = glGetUniformLocation(prog, "mouse");
-   GLint u_resolution = glGetUniformLocation(prog, "resolution");
+   GLint u_time = glGetUniformLocation (prog, "time");
+   GLint u_mouse = glGetUniformLocation (prog, "mouse");
+   GLint u_resolution = glGetUniformLocation (prog, "resolution");
    
    /*
     * Rendering loop
     */
-   glViewport(0,0,width,height);
-   assertOpenGLError("glViewport");
+   glViewport (0,0,width,height);
+   assertOpenGLError ("glViewport");
 
    if (u_resolution != -1) {
-      glUniform2f(u_resolution, (GLfloat) g_width, (GLfloat) g_height);
+      glUniform2f (u_resolution, (GLfloat) g_width, (GLfloat) g_height);
    }
 
+   
    GLfloat time = 0.0f;
    while (!g_done) {
 
       /* modify value of uniform variables */
       if (u_time != -1) {
-         glUniform1f(u_time, time);
+         glUniform1f (u_time, time);
       }
       if (u_mouse != -1) {
-         glUniform2f(u_mouse, (GLfloat) g_mouse_x, (GLfloat) g_mouse_y);
+         glUniform2f (u_mouse, (GLfloat) g_mouse_x, (GLfloat) g_mouse_y);
       }
       
-      glClear(GL_COLOR_BUFFER_BIT);
-      assertOpenGLError("glClear");
+      glClear (GL_COLOR_BUFFER_BIT);
+      assertOpenGLError ("glClear");
 
-      glBindVertexArray(vao);
-      assertOpenGLError("glBindVertexArray");
-      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-      assertOpenGLError("glDrawArrays");
+      glBindVertexArray (vao);
+      assertOpenGLError ("glBindVertexArray");
+      glDrawArrays (GL_TRIANGLE_STRIP, 0, 4);
+      assertOpenGLError ("glDrawArrays");
    
-      glFlush();
+      glFlush ();
 
-      glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, g_pim->pixels);
+      glReadPixels (0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, g_pim->pixels);
 
-      usleep(1000000/g_framerate);
-      time += 1.0/g_framerate;
+      waitmsec (1000/g_fps);
+      time += 1.0/g_fps;
    }
 
    /*
     * Destroy context.
     */
-   glDeleteFramebuffers(1, &frameBuffer);
-   glDeleteTextures(1, &t);
+   glDeleteFramebuffers (1, &frameBuffer);
+   glDeleteTextures (1, &t);
 
-   eglDestroyContext(display, context);
-   assertEGLError("eglDestroyContext");
+   eglDestroyContext (display, context);
+   assertEGLError ("eglDestroyContext");
 
-   eglTerminate(display);
-   assertEGLError("eglTerminate");
+   eglTerminate (display);
+   assertEGLError ("eglTerminate");
 
    return 0;
 }
 
+// --------------------------------------------------------------------------
+//   Build result and prints it
+// --------------------------------------------------------------------------
+int result (int code, char *fmt, ...)
+{
+  va_list va;
+  va_start(va, fmt);
+  vprintf(fmt, va);
+  va_end(va);
+  return code;
+}
+
+// --------------------------------------------------------------------------
+//   Build error message regarding arguments number
+// --------------------------------------------------------------------------
+int wrong_num_args (int argc, char **argv, char *msg)
+{
+  char fmt[] = "%s wrong # args: %s %s %s %s %s %s";
+  fmt[16 + 3*argc] = 0;
+  switch (argc) {
+  case 0: return result (1, fmt, argv[0], msg);
+  case 1: return result (1, fmt, argv[0], argv[0], msg);
+  case 2: return result (1, fmt, argv[0], argv[0], argv[1], msg);
+  case 3: return result (1, fmt, argv[0], argv[0], argv[1], argv[2], msg);
+  case 4: return result (1, fmt, argv[0], argv[0], argv[1], argv[2], argv[3], msg);
+  default:
+    return result (1, fmt, argv[0], argv[0], argv[1], argv[2], argv[3], msg);
+  };
+}
+
+// --------------------------------------------------------------------------
+//   Changing FPS
+// --------------------------------------------------------------------------
+int cmd_help (int argc, char **argv)
+{
+  if (argc != 1 && argc != 2) {
+    return wrong_num_args (1, argv, "?topic?");
+  }
+  if (argc == 1) {
+    char *helpmsg =
+      "colorspace rgb/yuv" "\n"
+      "fps frame-per-second" "\n"
+      "kill pid" "\n"
+      "mouse x y" "\n"
+      "shader /path/to/fragment-shader" "\n"
+      "help ?topic?" "\n"
+      "quit" "\n";
+    result (0, helpmsg);
+  }
+  else {
+    if (!strcmp (argv[1], "help")) {
+      char *helpmsg =
+	"";
+      result (0, helpmsg);
+    }
+    if (!strcmp (argv[1], "quit")) {
+      char *helpmsg =
+	"";
+      result (0, helpmsg);
+    }
+    if (!strcmp (argv[1], "colospace")) {
+      char *helpmsg =
+	"";
+      result (0, helpmsg);
+    }
+    if (!strcmp (argv[1], "fps")) {
+      char *helpmsg =
+	"";
+      result (0, helpmsg);
+    }
+    if (!strcmp (argv[1], "kill")) {
+      char *helpmsg =
+	"";
+      result (0, helpmsg);
+    }
+    if (!strcmp (argv[1], "mouse")) {
+      char *helpmsg =
+	"";
+      result (0, helpmsg);
+    }
+    if (!strcmp (argv[1], "shader")) {
+      char *helpmsg =
+	"";
+      result (0, helpmsg);
+    }
+  }
+  return 0;
+}
+
+// --------------------------------------------------------------------------
+//   Changing FPS
+// --------------------------------------------------------------------------
+int cmd_fps (int argc, char **argv)
+{
+  int fps;
+  if (argc != 2) {
+    return wrong_num_args (1, argv, "frame-per-second");
+  }
+  fps = atoi (argv[1]);
+  if (fps <= 0 || fps >= 100) {
+    return result(1, "expecting integer between 0 and 100, got '%s'", argv[1]);
+  }
+  g_fps = fps;
+  return 0;
+}
+
+// --------------------------------------------------------------------------
+//   Add / remove a process to signal with SIGUSR1 when
+//   a frame is ready to be read.
+// --------------------------------------------------------------------------
+int cmd_kill (int argc, char **argv)
+{
+  int pid;
+  if (argc != 3) {
+    return wrong_num_args (1, argv, "add/rm pid");
+  }
+  pid = atoi (argv[2]);
+  if (pid <= 0) {
+    return result(1, "expecting a valid PID number, got '%s'", argv[2]);
+  }
+  if (strcmp (argv[1], "add") && strcmp (argv[1], "rm")) {
+    return result(1, "valid %s subcommands are 'add' or 'rm'", argv[0]);
+  }
+  //@todo do something
+  return 0;
+}
+
+// --------------------------------------------------------------------------
+//   Close program
+// --------------------------------------------------------------------------
+int cmd_quit (int argc, char **argv)
+{
+  if (argc !=1) {
+    return wrong_num_args (1, argv, "");
+  }
+  exit (0);
+}
+
+// --------------------------------------------------------------------------
+//   Move mouse pointer
+// --------------------------------------------------------------------------
+int cmd_mouse (int argc, char **argv)
+{
+  int x, y;
+  if (argc != 3) {
+    return wrong_num_args (1, argv, "x y");
+  }
+  x = atoi (argv[1]);
+  y = atoi (argv[2]);
+  //@todo check
+  g_mouse_x = x;
+  g_mouse_y = y;
+  return 0;
+}
+
+// --------------------------------------------------------------------------
+//   Change colospace yuv/rgb
+// --------------------------------------------------------------------------
+int cmd_colorspace (int argc, char **argv)
+{
+  if ((argc != 1) && (argc != 2)) {
+    return wrong_num_args (1, argv, "?yuv/rgb?");
+  }
+  if (argc == 2) {
+    if (!strcmp (argv[1], "yuv") && !strcmp (argv[1], "rgb")) {
+      return result(1, "expecting one of 'yuv' or 'rgb', but got '%s'.", argv[1]);
+    }
+    if (!strcmp (argv[1], "yuv")) {
+      g_colorspace = YUV;
+    }
+    if (!strcmp (argv[1], "rgb")) {
+      g_colorspace = RGB;
+    }
+  }
+  else {
+    result (0, (g_colorspace == RGB) ? "rgb" : "yuv");
+  }
+  return 0;
+}
+
+// --------------------------------------------------------------------------
+//   Change shader
+// --------------------------------------------------------------------------
+int cmd_shader (int argc, char **argv)
+{
+  if (argc != 2) {
+    return wrong_num_args (1, argv, "/path/to/shader");
+  }
+  if (!strcmp (argv[1], g_shader)) {
+    return 0;
+  }
+  if (access (argv[1], F_OK) != 0) {
+    result (1, "File '%s' not found.", argv[1]);
+  }
+  if (access (argv[1], R_OK) != 0) {
+    result (1, "File '%s' not readable.", argv[1]);
+  }
+  g_shader = argv[1];
+  // compute gl shader program
+  return 0;
+}
+
+// --------------------------------------------------------------------------
+//   Command parser and evaluator
+// --------------------------------------------------------------------------
+int eval (char* cmd)
+{
+  char *argv[16], *p;
+  int argc = 0;
+  for(p = strtok (cmd," \t"); (p != NULL) && (argc < 16); p = strtok(NULL, " \t")) {
+    argv[argc++] = p;
+  }
+  if (argc == 16) {
+    fprintf (stderr, "At most 16 words in a command.\n");
+    return 1;
+  }
+  switch (argv[0][0]) {
+  case 'c':
+    if (!strcmp (argv[0], "colorspace")) {
+      return cmd_kill (argc, argv);
+    }
+    break;
+  case 'f':
+    if (!strcmp (argv[0], "fps")) {
+      return cmd_fps (argc, argv);
+    }
+    break;
+  case 'h':
+    if (!strcmp (argv[0], "help")) {
+      return cmd_help (argc, argv);
+    }
+    break;
+  case 'k':
+    if (!strcmp (argv[0], "kill")) {
+      return cmd_kill (argc, argv);
+    }
+    break;
+  case 'm':
+    if (!strcmp (argv[0], "mouse")) {
+      return cmd_mouse (argc, argv);
+    }
+    break;
+  case 'q':
+    if (!strcmp (argv[0], "quit")) {
+      return cmd_quit (argc, argv);
+    }
+    break;
+  case 's':
+    if (!strcmp (argv[0], "shader")) {
+      return cmd_shader (argc, argv);
+    }
+    break;
+  }
+  return result(1, "Unknown command '%s'", argv[0]);
+}
 
 // --------------------------------------------------------------------------
 //   sigint handler
 // --------------------------------------------------------------------------
-void sigint(int dummy)
+void sigint (int dummy)
 {
    g_done = 1;
    signal(SIGINT, sigint);
@@ -407,7 +771,7 @@ void sigint(int dummy)
 // --------------------------------------------------------------------------
 //   Usage
 // --------------------------------------------------------------------------
-void usage(int argc, char **argv, int optind)
+void usage (int argc, char **argv, int optind)
 {
   const char *what = (optind > 0) ? "error" : "usage";
   const char *fmt =
@@ -436,7 +800,7 @@ int main(int argc, char **argv)
     case 'w':  g_width = atoi(optarg); break;
     case 'h':  g_height = atoi(optarg); break;
     case 'o':  g_out = optarg; break;
-    case 'f':  g_framerate = atoi(optarg); break;
+    case 'f':  g_fps = atoi(optarg); break;
     case 's':  g_shader = optarg; break;
     default:
       usage(argc, argv, optind);
@@ -452,23 +816,29 @@ int main(int argc, char **argv)
      fprintf(stderr, "Height (%d) out of range [1-4096].\n", g_height);
      exit(1);
   }
-  if (g_framerate <= 0 || g_framerate >= 100) {
-     fprintf(stderr, "Framerate (%d) out of range [1-100].\n", g_framerate);
+  if (g_fps <= 0 || g_fps >= 100) {
+     fprintf(stderr, "Framerate (%d) out of range [1-100].\n", g_fps);
      exit(1);
   }
+  if (access(g_shader,F_OK) != 0) {
+    fprintf(stderr, "File '%s' doesn't exist or can't be accessed.`n", g_shader);
+    exit(1);
+  }
+  if (access(g_shader,R_OK) != 0) {
+    fprintf(stderr, "File '%s' can't be read.`n", g_shader);
+    exit(1);
+  }
   
-  // Creation de l'image utilisée pour le rendu
-  int imfd = initout( g_out, g_width, g_height, g_pim );
-
   // install signal handler
   signal(SIGINT, sigint);
+
+  // Creation de l'image utilisée pour le rendu
+  g_outfd = initout( g_out, g_width, g_height, g_pim );
 
   renderloop(g_width, g_height);
 
   munmap(g_pim->pixels, nblk(g_width,g_height)*BLKSZ);
-  close(imfd);
+  close(g_outfd);
   
   return 0;
 }
-
-
