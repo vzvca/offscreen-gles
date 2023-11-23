@@ -67,9 +67,9 @@ There are some prerequisites, given here on debian 10 buster used during develop
 * `libgles2-mesa-dev`
 * `libegl1-mesa-dev`
 
-## WSL
+## Windows WSL2
 
-It is possible to use this program under WSL2 (tested on ubuntu-20.04).
+It is possible to use the `offscreen` program under WSL2 (tested on ubuntu-20.04).
 On this system the device `/dev/dri/renderD128` is present and can be used.
 Probably mesa will not be able to initialize properly without help and you will get a message like this:
 
@@ -79,6 +79,15 @@ Probably mesa will not be able to initialize properly without help and you will 
 To circumvent this issue, you need to help mesa to choose the right libray to load. For example:
 
     export MESA_LOADER_DRIVER_OVERRIDE=i965
+
+It is possible to use `sdl-win` too. It has been tested using `MobaXterm X11 server` with moba version 21.2, the following server modes works (others don't):
+
+* "Windowed mode": X11 server constrained to a single container window
+* "Windowed mode with DWM": X11 server with DWM desktop in a container window
+* "Windowed mode with Tvwm desktop": X11 server and Fvwm desktop in a container window
+* "Rootless": Transparent X11 server with Fvwm window borders (experimantal)
+
+`grab-png` wroks out of the box.
 
 ## Future directions
 
