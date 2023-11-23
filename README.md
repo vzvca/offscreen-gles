@@ -67,6 +67,18 @@ There are some prerequisites, given here on debian 10 buster used during develop
 * `libgles2-mesa-dev`
 * `libegl1-mesa-dev`
 
+## WSL
+
+It is possible to use this program under WSL2 (tested on ubuntu-20.04).
+On this system the device `/dev/dri/renderD128` is present and can be used.
+Probably mesa will not be able to initialize properly without help and you will get a message like this:
+
+    MESA-LOADER: failed to open vgem: /usr/lib/dri/vgem_dri.so: cannot open shared object file: No such file or directory (search paths /usr/lib/x86_64-linux-gnu/dri:\$${ORIGIN}/dri:/usr/lib/dri, suffix _dri)
+    failed to load driver: vgem
+
+To circumvent this issue, you need to help mesa to choose the right libray to load. For example:
+
+    export MESA_LOADER_DRIVER_OVERRIDE=i965
 
 ## Future directions
 
@@ -74,10 +86,11 @@ There are some prerequisites, given here on debian 10 buster used during develop
 
 ** dynamic change of shader
 ** viewpoint change
+** ...
 
 * Add to **offscreen** the ability to send a signal to client programs when a frame is ready
 * Add circular buffer of frames. At least 2.
-* Add RTP raw video streaming.
+* Add RTP raw video streaming as an external program which consumes frames (like `sdl-win` and `grap-png`).
 * Add H264/H265 video RTP streaming backend using `ffmpeg` or `x264` + `live555` or `vaapi` + `live555`.
 
 
