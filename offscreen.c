@@ -42,12 +42,24 @@
 #include <poll.h>
 
 /*
- * Graphic headers
+ * Graphic headers - implementation in header
  */
 #include <gbm.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl31.h>
+#define GLT_IMPLEMENTATION
+#define GLT_MANUAL_VIEWPORT
+#define GLT_DEBUG_PRINT
+#include "gltext.h"
+
+/*
+ * Command interpreter header - implementation in header
+ */
+#define PICOL_IMPLEMENTATION
+#include "picol.h"
+
+typedef struct picolInterp picol_t;
 
 
 //--------------------------------------------------------------------------
@@ -62,6 +74,8 @@
 
 #define YUV 1
 #define RGB 0
+
+#define PIXSZ 4
 
 //--------------------------------------------------------------------------
 //  Vertex Shader source code
@@ -82,20 +96,40 @@ typedef struct image_s image_t;
 //  Globals
 //--------------------------------------------------------------------------
 int          g_done = 0;
-int          g_width  = DEF_WVID;
-int          g_height = DEF_HVID;
-int          g_mouse_x = 0;
-int          g_mouse_y = 0;
-int          g_colorspace = RGB;
-const char*  g_out = DEF_OUTPUT;
-const char*  g_shader = DEF_SHADER;
-int          g_fps = DEF_FPS;
-image_t      g_im;
-image_t*     g_pim = &g_im;
-int          g_gbmfd = -1;
-int          g_outfd = -1;
-struct gbm_device*  g_gbm = NULL;
 
+typedef struct state_s state_t;
+struct state_s
+{
+  picolInterp *itp;               // command interpreter
+  
+  struct gbm_device *gbm;         // associated with "/dev/dri/renderD128"         
+  int  gbmfd;
+  EGLDisplay display;
+  EGLContext context;
+
+  char *out;                      // name of output file
+  int  outfd;                     // current output file mmaped
+  image_t img;                    // current image
+
+  // OpenGL / GLES objects    
+  GLuint fb;                      // framebuffer
+  GLuint tex;                     // texture
+  GLuint vbo;                     // vertex buffer object
+  GLuint vao;                     // vertex array object
+  GLint  u_time;                  // uniform
+  GLint  u_mouse;                 // uniform
+  GLint  u_resolution;            // uniform
+  GLTtext *msg;                   // message to display
+  GLuint prog;                    // current GLSLprogram
+
+  int fps;                        // video framerate
+  char *shader;                   // path to current fragment shader
+  int colorspace;                 // RGB or YUV colorspace
+  int mouse_x, mouse_y;           // current mouse position
+  pid_t  pids[4];                 // array of pids to kill when fram ready
+};
+
+state_t g_state;
 
 static const GLfloat points[] = {
    // front
@@ -108,28 +142,36 @@ static const GLfloat points[] = {
 // --------------------------------------------------------------------------
 //   Forward
 // --------------------------------------------------------------------------
-int eval (char* cmd);
+int eval (state_t *st, char* cmd);
+picolResult cmd_help (picolInterp *itp, int argc, const char *argv[], void *pd);
+picolResult cmd_quit (picolInterp *itp, int argc, const char *argv[], void *pd);
+picolResult cmd_kill (picolInterp *itp, int argc, const char *argv[], void *pd);
+picolResult cmd_colorspace (picolInterp *itp, int argc, const char *argv[], void *pd);
+picolResult cmd_fps (picolInterp *itp, int argc, const char *argv[], void *pd);
+picolResult cmd_mouse (picolInterp *itp, int argc, const char *argv[], void *pd);
+picolResult cmd_shader (picolInterp *itp, int argc, const char *argv[], void *pd);
+picolResult cmd_message (picolInterp *itp, int argc, const char *argv[], void *pd);
+
 
 // --------------------------------------------------------------------------
 //   Helper func
 // --------------------------------------------------------------------------
-int nblk(int w, int h)
+static int nblk (int w, int h)
 {
-   int sz = (w*h*4 + BLKSZ-1)/BLKSZ;
+   int sz = (w*h*PIXSZ + BLKSZ-1)/BLKSZ;
    return sz;
 }
 
 // --------------------------------------------------------------------------
 //   Prepare output file and mmap it
 // --------------------------------------------------------------------------
-int initout( const char *file, int width, int height, image_t *img )
+static int initout (state_t *st)
 {
   unsigned char block[BLKSZ];
   int i, ni, fbfd = -1;
-  char *fbp = 0;
   
   // Open the file for reading and writing
-  fbfd = open (file, O_RDWR | O_CREAT, S_IRWXU);
+  fbfd = open (st->out, O_RDWR | O_CREAT, S_IRWXU);
   if (fbfd == -1) {
     perror ("Error: cannot open output file");
     exit (1);
@@ -138,7 +180,7 @@ int initout( const char *file, int width, int height, image_t *img )
 
   // fill image with 0
   bzero (block, sizeof(block));
-  ni = nblk (width,height);
+  ni = nblk (st->img.w, st->img.h);
   for( i = 0; i < ni; ++i ) {
     if ( -1 == write (fbfd, block, sizeof(block)) ) {
       perror ("Error: writing output file.");
@@ -147,25 +189,23 @@ int initout( const char *file, int width, int height, image_t *img )
   }
 
   // Map the device to memory
-  fbp = (char *) mmap (0, ni * sizeof(block), PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
-  if (*(int*)fbp == -1) {
+  st->img.pixels = (uint32_t *) mmap (0, ni * sizeof(block), PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
+  if (*st->img.pixels == -1) {
     perror("Error: failed to map output file to memory");
     exit(1);
   }
   printf("The output file was mapped to memory successfully.\n");
   
-  img->w = width;
-  img->h = height;
-  img->stride = width;
-  img->pixels  = (uint32_t*) fbp;
-    
+  st->img.stride = st->img.w;
+  st->outfd = fbfd;
+  
   return fbfd;
 }
 
 // --------------------------------------------------------------------------
 //   Assertion code
 // --------------------------------------------------------------------------
-void assertOpenGLError(const char* msg) {
+void assertOpenGLError (const char* msg) {
    GLenum error = glGetError ();
 
    if (error != GL_NO_ERROR) {
@@ -177,7 +217,7 @@ void assertOpenGLError(const char* msg) {
 // --------------------------------------------------------------------------
 //   Assertion code
 // --------------------------------------------------------------------------
-void assertEGLError(const char* msg) {
+void assertEGLError (const char* msg) {
    EGLint error = eglGetError ();
 
    if (error != EGL_SUCCESS) {
@@ -189,7 +229,7 @@ void assertEGLError(const char* msg) {
 // --------------------------------------------------------------------------
 //   Create shader from string content
 // --------------------------------------------------------------------------
-GLuint mkshader(GLuint type, const char *src, GLint len)
+GLuint mkshader (GLuint type, const char *src, GLint len)
 {
    GLuint vsh = glCreateShader (type);
    assertOpenGLError ("glCreateShader");
@@ -232,15 +272,268 @@ GLuint mkshaderf (GLuint type, const char *fname)
    return mkshader (type, (const char*) src, len);
 }
 
-int glinit()
+
+// --------------------------------------------------------------------------
+//   Create program from shaders
+// --------------------------------------------------------------------------
+GLuint mkprog (state_t *st, GLuint vsh, GLuint fsh)
 {
-  return 0;
+  GLint lks, len;
+
+  if (st->prog) {
+     glDeleteProgram (st->prog);
+  }
+  
+  st->prog = glCreateProgram ();
+  assertOpenGLError ("glCreateProgram");
+  glAttachShader (st->prog, vsh);
+  assertOpenGLError ("glAttachShader VS");
+  glAttachShader (st->prog, fsh);
+  assertOpenGLError ("glAttachShader FS");
+  glLinkProgram (st->prog);
+  glGetProgramiv(st->prog, GL_LINK_STATUS, &lks);
+
+  if (lks != GL_TRUE) {
+    glGetProgramiv(st->prog, GL_INFO_LOG_LENGTH, &len);
+    if (len > 1) {
+      int glen = len * sizeof(GLchar);
+      GLchar *log = (GLchar*)malloc (glen);
+
+      glGetProgramInfoLog (st->prog, glen, NULL, log);
+      printf("Program #%u <Info Log>:\n%s\n", st->prog, log);
+      free(log);
+    }
+    assertOpenGLError ("glLinkProgram");
+  }
+
+  glUseProgram (st->prog);
+  assertOpenGLError ("glUseProgram");
+
+   /*
+    * Release shaders
+    */
+  glDetachShader (st->prog, vsh); glDeleteShader(vsh);
+  glDetachShader (st->prog, fsh); glDeleteShader(fsh);
+   
+   /*
+    * Bind uniforms
+    */
+   st->u_time = glGetUniformLocation (st->prog, "time");
+   st->u_mouse = glGetUniformLocation (st->prog, "mouse");
+   st->u_resolution = glGetUniformLocation (st->prog, "resolution");
+
+   return st->prog;
+}
+
+
+// --------------------------------------------------------------------------
+//   Graphics initialisation
+// --------------------------------------------------------------------------
+int glinit(state_t *st)
+{
+   /*
+    * EGL initialization and OpenGL context creation.
+    */
+   EGLConfig config;
+   EGLint num_config;
+
+   st->gbmfd = open ("/dev/dri/renderD128", O_RDWR);
+   assert (st->gbmfd > 0);
+
+   st->gbm = gbm_create_device (st->gbmfd);
+   assert (st->gbm != NULL);
+
+   /* setup EGL from the GBM device */
+   st->display = eglGetPlatformDisplay (EGL_PLATFORM_GBM_MESA, st->gbm, NULL);
+   assert (st->display != NULL);
+   assertEGLError ("eglGetDisplay");
+
+   eglInitialize (st->display, NULL, NULL);
+   assertEGLError ("eglInitialize");
+
+   eglChooseConfig (st->display, NULL, &config, 1, &num_config);
+   assertEGLError ("eglChooseConfig");
+
+   eglBindAPI (EGL_OPENGL_ES_API);
+   assertEGLError ("eglBindAPI");
+
+   static const EGLint attribs[] = {
+      EGL_CONTEXT_CLIENT_VERSION, 3,
+      EGL_NONE
+   };
+        
+   st->context = eglCreateContext (st->display, config, EGL_NO_CONTEXT, attribs);
+   assertEGLError ("eglCreateContext");
+
+   eglMakeCurrent (st->display, NULL, NULL, st->context);
+   assertEGLError ("eglMakeCurrent");
+
+   /*
+    * Create an OpenGL framebuffer as render target.
+    */
+   glGenFramebuffers (1, &st->fb);
+   glBindFramebuffer (GL_FRAMEBUFFER, st->fb);
+   assertOpenGLError ("glBindFramebuffer");
+
+   /*
+    * Create a texture as color attachment.
+    */
+   glGenTextures(1, &st->tex);
+
+   glBindTexture (GL_TEXTURE_2D, st->tex);
+   glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA, st->img.w, st->img.h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+   assertOpenGLError ("glTexImage2D");
+
+   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+   /*
+    * Attach the texture to the framebuffer.
+    */
+   glFramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, st->tex, 0);
+   assertOpenGLError ("glFramebufferTexture2D");
+
+   glBindTexture (GL_TEXTURE_2D, 0);
+   
+   
+   /*
+    * Create VBO
+    */
+   glGenBuffers (1, &st->vbo);
+   assertOpenGLError ("glGenBuffers");
+   glBindBuffer (GL_ARRAY_BUFFER, st->vbo);
+   assertOpenGLError ("glBindBuffer");
+   glBufferData (GL_ARRAY_BUFFER, 12*sizeof(GLfloat), points, GL_STATIC_DRAW);
+   assertOpenGLError ("glBufferData");
+
+   glGenVertexArrays (1, &st->vao);
+   assertOpenGLError ("glGenVertexArrays");
+   glBindVertexArray (st->vao);
+   assertOpenGLError ("glBindVertexArray");
+   glEnableVertexAttribArray (0);
+   assertOpenGLError ("glEnableVertexArrayAttrib");
+   glBindBuffer (GL_ARRAY_BUFFER, st->vbo);
+   assertOpenGLError ("glBindBuffer");
+   glVertexAttribPointer (0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
+   assertOpenGLError ("glVertexAttribPointer");
+   glBindBuffer (GL_ARRAY_BUFFER, 0);
+   glBindVertexArray (0);
+
+   /*
+    * Initialize text rendering
+    */
+
+   if (!gltInit ()) {
+     fprintf(stderr,"glt init failed\n");
+     exit(1);
+   }
+   st->msg = gltCreateText();
+   gltSetText(st->msg, "Hello \nWorld!");
+   
+   /*
+    * Compile shader
+    */
+
+   GLuint vsh = mkshader (GL_VERTEX_SHADER, VERTEX_SHADER_SRC, -1);
+   GLuint fsh = mkshaderf (GL_FRAGMENT_SHADER, st->shader);
+   mkprog (st, vsh, fsh);
+
+   /*
+    * Create command interpreter
+    * and register new commands
+    */
+   st->itp = picolCreateInterp ();
+   picolRegisterCmd (st->itp, "help", cmd_help, st);
+   picolRegisterCmd (st->itp, "quit", cmd_quit, st);
+   picolRegisterCmd (st->itp, "exit", cmd_quit, st);
+   picolRegisterCmd (st->itp, "colorspace", cmd_colorspace, st);
+   picolRegisterCmd (st->itp, "fps", cmd_fps, st);
+   picolRegisterCmd (st->itp, "mouse", cmd_mouse, st);
+   picolRegisterCmd (st->itp, "kill", cmd_kill, st);
+   picolRegisterCmd (st->itp, "shader", cmd_shader, st);
+   picolRegisterCmd (st->itp, "message", cmd_message, st);
+   
+   return 0;
+}
+
+// --------------------------------------------------------------------------
+//   End of program
+// --------------------------------------------------------------------------
+void glfinish (state_t *st)
+{
+  /*
+   * Terminate text remndering engine
+   */ 
+  gltDeleteText (st->msg);
+  gltTerminate();
+
+  /*
+   * Delete GL objects
+   */
+  glDeleteProgram (st->prog);
+  glDeleteVertexArrays (1, &st->vao);
+  glDeleteBuffers (1, &st->vbo );
+  glDeleteTextures (1, &st->tex);
+  glDeleteFramebuffers (1, &st->fb);
+  
+  /*
+   * Destroy context.
+   */
+  glDeleteFramebuffers (1, &st->fb);
+  glDeleteTextures (1, &st->tex);
+  
+  eglDestroyContext (st->display, st->context);
+  assertEGLError ("eglDestroyContext");
+  
+  eglTerminate (st->display);
+  assertEGLError ("eglTerminate");
+
+  /*
+   * Close device
+   */
+  gbm_device_destroy (st->gbm);
+  close (st->gbmfd);
+
+  /*
+   * Unmap memory mapped file
+   */
+  munmap (st->img.pixels, BLKSZ * nblk (st->img.stride, st->img.h));
+  close (st->outfd);
+
+  /*
+   * Free memory
+   */
+  free (st->shader);
+  picolFreeInterp (st->itp);
+}
+
+// --------------------------------------------------------------------------
+//   Display program banner
+// --------------------------------------------------------------------------
+void banner()
+{
+  if (isatty (fileno (stdin)) && isatty (fileno (stdout))) {
+    puts ("offscreen renderer cli. Type 'help' to see available commands.");
+  }
+}
+
+// --------------------------------------------------------------------------
+//   Display prompt if on a terminal
+// --------------------------------------------------------------------------
+void prompt()
+{
+  if (isatty (fileno (stdin)) && isatty (fileno (stdout))) {
+    printf ("=> ");
+    fflush (stdout);
+  }
 }
 
 // --------------------------------------------------------------------------
 //   Wait a few milliseconds keeping an eye on stdin
 // --------------------------------------------------------------------------
-int waitmsec (int msec)
+int waitmsec (state_t *st, int msec)
 {
   struct timeval start, now;
   struct pollfd fds[1];
@@ -269,11 +562,13 @@ int waitmsec (int msec)
       if (sz == -1) {
 	// read error ! leave
 	perror ("read()");
+	glfinish (st);
 	exit (1);
       }
       if (sz == 0) {
 	// stdin closed ! leave
 	fprintf (stderr, "stdin closed.\n");
+	glfinish (st);
 	exit (1);
       }
       else {
@@ -282,12 +577,13 @@ int waitmsec (int msec)
 	for (p = s; (p - sline) < sz && *p != '\n'; ++p);
 	if (*p == '\n') {
 	  *p = 0;
-	  eval (s);
+	  eval (st, s);
 	  ++p;
 	  if (p - sline < sz) {
 	    s = p;
 	    goto parse;
 	  }
+	  prompt();
 	}
 	else {
 	  // line not complete - read more input or leave
@@ -326,437 +622,359 @@ int waitmsec (int msec)
 // --------------------------------------------------------------------------
 //   GL initialisation and rendering
 // --------------------------------------------------------------------------
-int renderloop(int width, int height) {
-   /*
-    * EGL initialization and OpenGL context creation.
-    */
-   EGLDisplay display;
-   EGLConfig config;
-   EGLContext context;
-   EGLint num_config;
-
-   g_gbmfd = open ("/dev/dri/renderD128", O_RDWR);
-   assert (g_gbmfd > 0);
-
-   g_gbm = gbm_create_device (g_gbmfd);
-   assert (g_gbm != NULL);
-
-   /* setup EGL from the GBM device */
-   display = eglGetPlatformDisplay (EGL_PLATFORM_GBM_MESA, g_gbm, NULL);
-   //display = eglGetDisplay (EGL_DEFAULT_DISPLAY);
-   assert (display != NULL);
-   assertEGLError ("eglGetDisplay");
-
-   eglInitialize (display, NULL, NULL);
-   assertEGLError ("eglInitialize");
-
-   eglChooseConfig (display, NULL, &config, 1, &num_config);
-   assertEGLError ("eglChooseConfig");
-
-   eglBindAPI (EGL_OPENGL_ES_API);
-   assertEGLError ("eglBindAPI");
-
-   static const EGLint attribs[] = {
-      EGL_CONTEXT_CLIENT_VERSION, 3,
-      EGL_NONE
-   };
-        
-   context = eglCreateContext (display, config, EGL_NO_CONTEXT, attribs);
-   assertEGLError ("eglCreateContext");
-
-   eglMakeCurrent (display, NULL, NULL, context);
-   assertEGLError ("eglMakeCurrent");
-
-   /*
-    * Create an OpenGL framebuffer as render target.
-    */
-   GLuint frameBuffer;
-   glGenFramebuffers (1, &frameBuffer);
-   glBindFramebuffer (GL_FRAMEBUFFER, frameBuffer);
-   assertOpenGLError ("glBindFramebuffer");
-
-   /*
-    * Create a texture as color attachment.
-    */
-   GLuint t;
-   glGenTextures(1, &t);
-
-   glBindTexture (GL_TEXTURE_2D, t);
-   glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-   assertOpenGLError ("glTexImage2D");
-
-   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-   /*
-    * Attach the texture to the framebuffer.
-    */
-   glFramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t, 0);
-   assertOpenGLError ("glFramebufferTexture2D");
-
-   /*
-    * Create VBO
-    */
-   GLuint vbo = 0;
-   glGenBuffers (1, &vbo);
-   assertOpenGLError ("glGenBuffers");
-   glBindBuffer (GL_ARRAY_BUFFER, vbo);
-   assertOpenGLError ("glBindBuffer");
-   glBufferData (GL_ARRAY_BUFFER, 12*sizeof(GLfloat), points, GL_STATIC_DRAW);
-   assertOpenGLError ("glBufferData");
-
-   GLuint vao = 0;
-   glGenVertexArrays (1, &vao);
-   assertOpenGLError ("glGenVertexArrays");
-   glBindVertexArray (vao);
-   assertOpenGLError ("glBindVertexArray");
-   glEnableVertexAttribArray (0);
-   assertOpenGLError ("glEnableVertexArrayAttrib");
-   glBindBuffer (GL_ARRAY_BUFFER, vbo);
-   assertOpenGLError ("glBindBuffer");
-   glVertexAttribPointer (0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
-   assertOpenGLError ("glVertexAttribPointer");
-
-   /*
-    * Compile shader
-    */
-
-   GLuint vsh = mkshader (GL_VERTEX_SHADER, VERTEX_SHADER_SRC, -1);
-   GLuint fsh = mkshaderf (GL_FRAGMENT_SHADER, g_shader);
-
-   GLuint prog = glCreateProgram ();
-   assertOpenGLError ("glCreateProgram");
-   glAttachShader (prog, vsh);
-   assertOpenGLError ("glAttachShader VS");
-   glAttachShader (prog, fsh);
-   assertOpenGLError ("glAttachShader FS");
-   glLinkProgram (prog);
-   assertOpenGLError ("glLinkProgram");
-   puts ("Program log");
-   char msg[2048] = {0};
-   int msglen;
-   glGetProgramInfoLog (prog, sizeof(msg), &msglen, msg);
-   puts (msg);
-
-   glUseProgram (prog);
-   assertOpenGLError ("glUseProgram");
-
-   /*
-    * Bind uniforms
-    */
-   GLint u_time = glGetUniformLocation (prog, "time");
-   GLint u_mouse = glGetUniformLocation (prog, "mouse");
-   GLint u_resolution = glGetUniformLocation (prog, "resolution");
-   
+int renderloop (state_t *st)
+{
    /*
     * Rendering loop
     */
-   glViewport (0,0,width,height);
+   glViewport (0, 0, st->img.w, st->img.h);
    assertOpenGLError ("glViewport");
 
-   if (u_resolution != -1) {
-      glUniform2f (u_resolution, (GLfloat) g_width, (GLfloat) g_height);
-   }
-
-   
    GLfloat time = 0.0f;
    while (!g_done) {
-
-      /* modify value of uniform variables */
-      if (u_time != -1) {
-         glUniform1f (u_time, time);
-      }
-      if (u_mouse != -1) {
-         glUniform2f (u_mouse, (GLfloat) g_mouse_x, (GLfloat) g_mouse_y);
-      }
-      
       glClear (GL_COLOR_BUFFER_BIT);
       assertOpenGLError ("glClear");
 
-      glBindVertexArray (vao);
+      glUseProgram (st->prog);
+      assertOpenGLError ("glUseProgram");
+
+      /* modify value of uniform variables */
+      if (st->u_resolution != -1) {
+	glUniform2f (st->u_resolution, (GLfloat) st->img.w, (GLfloat) st->img.h);
+      }
+      if (st->u_time != -1) {
+	glUniform1f (st->u_time, time);
+      }
+      if (st->u_mouse != -1) {
+	glUniform2f (st->u_mouse, (GLfloat) st->mouse_x, (GLfloat) st->mouse_y);
+      }
+
+      // -- draw texture
+      glBindVertexArray (st->vao);
       assertOpenGLError ("glBindVertexArray");
       glDrawArrays (GL_TRIANGLE_STRIP, 0, 4);
       assertOpenGLError ("glDrawArrays");
-   
+      glBindVertexArray (0);
+      glUseProgram (0);
+      
+      // -- draw text
+      gltBeginDraw ();
+      gltViewport (st->img.w, st->img.h);
+      gltColor (1.0f, 1.0f, 0.0f, 0.2f);
+      gltDrawText2D (st->msg, 0.0f, 0.0f, 1.5f); // x=0.0, y=0.0, scale=1.0
+      gltEndDraw ();
+      glUseProgram (0);
+
+      // -- read image to mmap buffer
       glFlush ();
+      glReadPixels (0, 0, st->img.w, st->img.h, GL_RGBA, GL_UNSIGNED_BYTE, st->img.pixels);
 
-      glReadPixels (0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, g_pim->pixels);
-
-      waitmsec (1000/g_fps);
-      time += 1.0/g_fps;
+      waitmsec (st, 1000/st->fps);
+      time += 1.0/st->fps;
    }
-
-   /*
-    * Destroy context.
-    */
-   glDeleteFramebuffers (1, &frameBuffer);
-   glDeleteTextures (1, &t);
-
-   eglDestroyContext (display, context);
-   assertEGLError ("eglDestroyContext");
-
-   eglTerminate (display);
-   assertEGLError ("eglTerminate");
 
    return 0;
 }
 
 // --------------------------------------------------------------------------
+//   Send kill signal to registered client process
+// --------------------------------------------------------------------------
+void do_kill ()
+{
+  int i;
+  for (i = 0; i < 4; ++i) {
+    if (g_state.pids[i] <= 0) continue;
+    if (kill (g_state.pids[i], 0) == -1) {
+      // target process dead maybe ? remove from table.
+      g_state.pids[i] = 0;
+    }
+    else if (kill (g_state.pids[i], SIGUSR1) == -1) {
+      perror ("kill()");
+      exit (1);
+    }
+  }
+}
+
+// --------------------------------------------------------------------------
 //   Build result and prints it
 // --------------------------------------------------------------------------
-int result (int code, char *fmt, ...)
+int result (picolInterp *itp, int code, char *fmt, ...)
 {
   va_list va;
   va_start(va, fmt);
   vprintf(fmt, va);
   va_end(va);
+  puts("");
   return code;
 }
 
 // --------------------------------------------------------------------------
 //   Build error message regarding arguments number
 // --------------------------------------------------------------------------
-int wrong_num_args (int argc, char **argv, char *msg)
+int wrong_num_args (picolInterp *itp, int argc, const char *argv[], char *msg)
 {
   char fmt[] = "%s wrong # args: %s %s %s %s %s %s";
   fmt[16 + 3*argc] = 0;
   switch (argc) {
-  case 0: return result (1, fmt, argv[0], msg);
-  case 1: return result (1, fmt, argv[0], argv[0], msg);
-  case 2: return result (1, fmt, argv[0], argv[0], argv[1], msg);
-  case 3: return result (1, fmt, argv[0], argv[0], argv[1], argv[2], msg);
-  case 4: return result (1, fmt, argv[0], argv[0], argv[1], argv[2], argv[3], msg);
+  case 0: return result (itp, PICOL_ERR, fmt, argv[0], msg);
+  case 1: return result (itp, PICOL_ERR, fmt, argv[0], argv[0], msg);
+  case 2: return result (itp, PICOL_ERR, fmt, argv[0], argv[0], argv[1], msg);
+  case 3: return result (itp, PICOL_ERR, fmt, argv[0], argv[0], argv[1], argv[2], msg);
+  case 4: return result (itp, PICOL_ERR, fmt, argv[0], argv[0], argv[1], argv[2], argv[3], msg);
   default:
-    return result (1, fmt, argv[0], argv[0], argv[1], argv[2], argv[3], msg);
+    return result (itp, PICOL_ERR, fmt, argv[0], argv[0], argv[1], argv[2], argv[3], msg);
   };
 }
 
 // --------------------------------------------------------------------------
-//   Changing FPS
+//   Prints help
 // --------------------------------------------------------------------------
-int cmd_help (int argc, char **argv)
+picolResult cmd_help (picolInterp *itp, int argc, const char *argv[], void *pd)
 {
   if (argc != 1 && argc != 2) {
-    return wrong_num_args (1, argv, "?topic?");
+    return wrong_num_args (itp, 1, argv, "?topic?");
   }
   if (argc == 1) {
     char *helpmsg =
-      "colorspace rgb/yuv" "\n"
-      "fps frame-per-second" "\n"
-      "kill pid" "\n"
-      "mouse x y" "\n"
-      "shader /path/to/fragment-shader" "\n"
+      "colorspace ?rgb/yuv?" "\n"
+      "fps ?frame-per-second?" "\n"
+      "kill ?add/rm pid?" "\n"
+      "message ?msg?" "\n"
+      "mouse ?x y?" "\n"
+      "shader ?/path/to/fragment-shader?" "\n"
       "help ?topic?" "\n"
-      "quit" "\n";
-    result (0, helpmsg);
+      "quit ?status?" "\n";
+    return result (itp, PICOL_OK, helpmsg);
   }
   else {
     if (!strcmp (argv[1], "help")) {
       char *helpmsg =
-	"";
-      result (0, helpmsg);
+	"Without 'topic' argument, prints general help. Otherwise prints detailed help on 'topic'.";
+      return result (itp, PICOL_OK, helpmsg);
     }
     if (!strcmp (argv[1], "quit")) {
       char *helpmsg =
-	"";
-      result (0, helpmsg);
+	"Leave program. Returns 'status' if supplied and 0 otherwise. 'status' must be a valid integer. ";
+      return result (itp, PICOL_OK, helpmsg);
     }
-    if (!strcmp (argv[1], "colospace")) {
+    if (!strcmp (argv[1], "colorspace")) {
       char *helpmsg =
-	"";
-      result (0, helpmsg);
+	"With no argument, returns current colorspace. Otherwise sets colorspace according to argument. Valid values are 'rgb' or 'yuv'.";
+      return result (itp, PICOL_OK, helpmsg);
     }
     if (!strcmp (argv[1], "fps")) {
       char *helpmsg =
-	"";
-      result (0, helpmsg);
+	"With no argument, returns current video framerate. Otherwise sets framerate according to argument. Valud values are integer between 1 and 100.";
+      return result (itp, PICOL_OK, helpmsg);
     }
     if (!strcmp (argv[1], "kill")) {
       char *helpmsg =
-	"";
-      result (0, helpmsg);
+	"With no arguments, returns the list of processes which are signaled when a video frame is ready. Otherwise adds or removes a process from the list of processes to signal with SIGUSR1.";
+      return result (itp, PICOL_OK, helpmsg);
     }
     if (!strcmp (argv[1], "mouse")) {
       char *helpmsg =
-	"";
-      result (0, helpmsg);
+	"With no arguments, returns current mouse position. Otherwise sets mouse position. Mouse position is sent to shader program which will use it or not.";
+      return result (itp, PICOL_OK, helpmsg);
     }
     if (!strcmp (argv[1], "shader")) {
       char *helpmsg =
-	"";
-      result (0, helpmsg);
+	"With no argument, returns current shader program. Otherwise changes shader program on the fly.";
+      return result (itp, PICOL_OK, helpmsg);
     }
   }
-  return 0;
+  return result (itp, PICOL_ERR, "unknown help topic");
 }
 
 // --------------------------------------------------------------------------
 //   Changing FPS
 // --------------------------------------------------------------------------
-int cmd_fps (int argc, char **argv)
+picolResult cmd_fps (picolInterp *itp, int argc, const char *argv[], void *pd)
 {
+  state_t *state = pd;
   int fps;
-  if (argc != 2) {
-    return wrong_num_args (1, argv, "frame-per-second");
+  if (argc != 1 && argc != 2) {
+    return wrong_num_args (itp, 1, argv, "frame-per-second");
   }
-  fps = atoi (argv[1]);
-  if (fps <= 0 || fps >= 100) {
-    return result(1, "expecting integer between 0 and 100, got '%s'", argv[1]);
+  if (argc == 2) {
+    fps = atoi (argv[1]);
+    if (fps <= 0 || fps >= 100) {
+      return result(itp, PICOL_ERR, "expecting integer between 0 and 100, got '%s'", argv[1]);
+    }
+    state->fps = fps;
+    return PICOL_OK;
   }
-  g_fps = fps;
-  return 0;
+  else {
+    return result (itp, PICOL_OK, "%d", state->fps);
+  }
 }
 
 // --------------------------------------------------------------------------
 //   Add / remove a process to signal with SIGUSR1 when
 //   a frame is ready to be read.
 // --------------------------------------------------------------------------
-int cmd_kill (int argc, char **argv)
+picolResult cmd_kill (picolInterp *itp, int argc, const char *argv[], void *pd)
 {
+  state_t *state = pd;
   int pid;
   if (argc != 3) {
-    return wrong_num_args (1, argv, "add/rm pid");
+    return wrong_num_args (itp, 1, argv, "add/rm pid");
   }
   pid = atoi (argv[2]);
   if (pid <= 0) {
-    return result(1, "expecting a valid PID number, got '%s'", argv[2]);
+    return result(itp, PICOL_ERR, "expecting a valid PID number, got '%s'", argv[2]);
   }
   if (strcmp (argv[1], "add") && strcmp (argv[1], "rm")) {
-    return result(1, "valid %s subcommands are 'add' or 'rm'", argv[0]);
+    return result(itp, PICOL_ERR, "valid %s subcommands are 'add' or 'rm'", argv[0]);
   }
-  //@todo do something
-  return 0;
+  if (!strcmp (argv[1], "add")) {
+    int i;
+    for (i = 0; i < 4; ++i) {
+      if (state->pids[i] == 0) break;
+    }
+    if (i == 4) {
+      return result (itp, PICOL_ERR, "pid table full");
+    }
+    if (kill (pid, 0) == -1) {
+      return result (itp, PICOL_ERR, "can't send signal to pid");
+    }
+    state->pids[i] = pid;
+  }
+  if (!strcmp (argv[1], "rm")) {
+    int i;
+    for (i = 0; i < 4; ++i) {
+      if (state->pids[i] == pid) {
+	state->pids[i] = 0;
+	break;
+      }
+    }
+  }
+  
+  return PICOL_OK;
 }
 
 // --------------------------------------------------------------------------
 //   Close program
 // --------------------------------------------------------------------------
-int cmd_quit (int argc, char **argv)
+picolResult cmd_quit (picolInterp *itp, int argc, const char *argv[], void *pd)
 {
-  if (argc !=1) {
-    return wrong_num_args (1, argv, "");
+  state_t *state = pd;
+  int status = 0;
+  if (argc != 1 && argc != 2) {
+    return wrong_num_args (itp, 1, argv, "?status?");
   }
-  exit (0);
+  if (argc == 2) {
+    status = atoi (argv[1]);
+  }
+  glfinish (state);
+  exit (status);
 }
 
 // --------------------------------------------------------------------------
 //   Move mouse pointer
 // --------------------------------------------------------------------------
-int cmd_mouse (int argc, char **argv)
+picolResult cmd_mouse (picolInterp *itp, int argc, const char *argv[], void *pd)
 {
-  int x, y;
-  if (argc != 3) {
-    return wrong_num_args (1, argv, "x y");
+  state_t *state = pd;
+  if (argc != 3 && argc != 1) {
+    return wrong_num_args (itp, 1, argv, "?x y?");
   }
-  x = atoi (argv[1]);
-  y = atoi (argv[2]);
-  //@todo check
-  g_mouse_x = x;
-  g_mouse_y = y;
-  return 0;
+  if (argc == 3) {
+    int x, y;
+    x = atoi (argv[1]);
+    y = atoi (argv[2]);
+    //@todo check
+    state->mouse_x = x;
+    state->mouse_y = y;
+    return PICOL_OK;
+  }
+  else {
+    return result(itp, PICOL_OK, "%d %d", state->mouse_x, state->mouse_y);
+  }
 }
 
 // --------------------------------------------------------------------------
-//   Change colospace yuv/rgb
+//   Change colorspace yuv/rgb
 // --------------------------------------------------------------------------
-int cmd_colorspace (int argc, char **argv)
+picolResult cmd_colorspace (picolInterp *itp, int argc, const char *argv[], void *pd)
 {
+  state_t *state = pd;
+
   if ((argc != 1) && (argc != 2)) {
-    return wrong_num_args (1, argv, "?yuv/rgb?");
+    return wrong_num_args (itp, 1, argv, "?yuv/rgb?");
   }
   if (argc == 2) {
     if (!strcmp (argv[1], "yuv") && !strcmp (argv[1], "rgb")) {
-      return result(1, "expecting one of 'yuv' or 'rgb', but got '%s'.", argv[1]);
+      return result(itp, PICOL_ERR, "expecting one of 'yuv' or 'rgb', but got '%s'.", argv[1]);
     }
     if (!strcmp (argv[1], "yuv")) {
-      g_colorspace = YUV;
+      state->colorspace = YUV;
     }
     if (!strcmp (argv[1], "rgb")) {
-      g_colorspace = RGB;
+      state->colorspace = RGB;
     }
+    return PICOL_OK;
   }
   else {
-    result (0, (g_colorspace == RGB) ? "rgb" : "yuv");
+    return result (itp, PICOL_OK, (state->colorspace == RGB) ? "rgb" : "yuv");
   }
-  return 0;
 }
 
 // --------------------------------------------------------------------------
 //   Change shader
 // --------------------------------------------------------------------------
-int cmd_shader (int argc, char **argv)
+picolResult cmd_shader (picolInterp *itp, int argc, const char *argv[], void *pd)
 {
-  if (argc != 2) {
-    return wrong_num_args (1, argv, "/path/to/shader");
+  state_t *state = pd;
+    
+  if (argc != 1 && argc != 2) {
+    return wrong_num_args (itp, 1, argv, "/path/to/shader");
   }
-  if (!strcmp (argv[1], g_shader)) {
-    return 0;
+  if (argc == 1) {
+    return result (itp, 0, state->shader);
   }
-  if (access (argv[1], F_OK) != 0) {
-    result (1, "File '%s' not found.", argv[1]);
+  else {
+    if (!strcmp (argv[1], state->shader)) {
+      return 0;
+    }
+    if (access (argv[1], F_OK) != 0) {
+      return result (itp, 1, "File '%s' not found.", argv[1]);
+    }
+    if (access (argv[1], R_OK) != 0) {
+      return result (itp, 1, "File '%s' not readable.", argv[1]);
+    }
+    free (state->shader);
+    state->shader = strdup (argv[1]);
+    GLuint vsh = mkshader (GL_VERTEX_SHADER, VERTEX_SHADER_SRC, -1);
+    GLuint fsh = mkshaderf (GL_FRAGMENT_SHADER, state->shader);
+    mkprog (state, vsh, fsh);
   }
-  if (access (argv[1], R_OK) != 0) {
-    result (1, "File '%s' not readable.", argv[1]);
-  }
-  g_shader = argv[1];
-  // compute gl shader program
-  return 0;
+  
+  return PICOL_OK;
 }
+
+// --------------------------------------------------------------------------
+//   Change message
+// --------------------------------------------------------------------------
+picolResult cmd_message (picolInterp *itp, int argc, const char *argv[], void *pd)
+{
+  state_t *state = pd;
+  
+  gltSetText (state->msg, argv[1]);
+
+  return PICOL_OK;
+}
+
 
 // --------------------------------------------------------------------------
 //   Command parser and evaluator
 // --------------------------------------------------------------------------
-int eval (char* cmd)
+int eval (state_t *st, char* cmd)
 {
-  char *argv[16], *p;
-  int argc = 0;
-  for(p = strtok (cmd," \t"); (p != NULL) && (argc < 16); p = strtok(NULL, " \t")) {
-    argv[argc++] = p;
+  int res = picolEval (st->itp, cmd);
+  if (res != PICOL_OK) {
+    puts (st->itp->result);
   }
-  if (argc == 16) {
-    fprintf (stderr, "At most 16 words in a command.\n");
-    return 1;
-  }
-  switch (argv[0][0]) {
-  case 'c':
-    if (!strcmp (argv[0], "colorspace")) {
-      return cmd_kill (argc, argv);
-    }
-    break;
-  case 'f':
-    if (!strcmp (argv[0], "fps")) {
-      return cmd_fps (argc, argv);
-    }
-    break;
-  case 'h':
-    if (!strcmp (argv[0], "help")) {
-      return cmd_help (argc, argv);
-    }
-    break;
-  case 'k':
-    if (!strcmp (argv[0], "kill")) {
-      return cmd_kill (argc, argv);
-    }
-    break;
-  case 'm':
-    if (!strcmp (argv[0], "mouse")) {
-      return cmd_mouse (argc, argv);
-    }
-    break;
-  case 'q':
-    if (!strcmp (argv[0], "quit")) {
-      return cmd_quit (argc, argv);
-    }
-    break;
-  case 's':
-    if (!strcmp (argv[0], "shader")) {
-      return cmd_shader (argc, argv);
-    }
-    break;
-  }
-  return result(1, "Unknown command '%s'", argv[0]);
 }
 
 // --------------------------------------------------------------------------
@@ -793,52 +1011,60 @@ void usage (int argc, char **argv, int optind)
 int main(int argc, char **argv)
 {
   int opt;
+
+  g_state.img.w = DEF_WVID;
+  g_state.img.h = DEF_HVID;
+  g_state.fps = DEF_FPS;
+  g_state.shader = strdup (DEF_SHADER);
+  g_state.out = DEF_OUTPUT;
   
-  while ( (opt = getopt( argc, argv, "?ho:w:f:s:")) != -1 ) {
+  while ((opt = getopt (argc, argv, "?ho:w:f:s:")) != -1 ) {
     switch( opt ) {
-    case '?':  usage( argc, argv, 0);
-    case 'w':  g_width = atoi(optarg); break;
-    case 'h':  g_height = atoi(optarg); break;
-    case 'o':  g_out = optarg; break;
-    case 'f':  g_fps = atoi(optarg); break;
-    case 's':  g_shader = optarg; break;
+    case '?':  usage (argc, argv, 0);
+    case 'w':  g_state.img.w = atoi (optarg); break;
+    case 'h':  g_state.img.h = atoi (optarg); break;
+    case 'o':  g_state.out = optarg; break;
+    case 'f':  g_state.fps = atoi (optarg); break;
+    case 's':  free (g_state.shader); g_state.shader = strdup (optarg); break;
     default:
-      usage(argc, argv, optind);
+      usage (argc, argv, optind);
     }
   }
 
   // check arguments
-  if (g_width <= 0 || g_width >= 4096) {
-     fprintf(stderr, "Width (%d) out of range [1-4096].\n", g_width);
+  if (g_state.img.w <= 0 || g_state.img.w >= 4096) {
+     fprintf (stderr, "Width (%d) out of range [1-4096].\n", g_state.img.w);
+     exit (1);
+  }
+  if (g_state.img.h <= 0 || g_state.img.h >= 4096) {
+     fprintf (stderr, "Height (%d) out of range [1-4096].\n", g_state.img.h);
+     exit (1);
+  }
+  if (g_state.fps <= 0 || g_state.fps >= 100) {
+     fprintf (stderr, "Framerate (%d) out of range [1-100].\n", g_state.fps);
      exit(1);
   }
-  if (g_height <= 0 || g_height >= 4096) {
-     fprintf(stderr, "Height (%d) out of range [1-4096].\n", g_height);
-     exit(1);
+  if (access (g_state.shader, F_OK) != 0) {
+    fprintf (stderr, "File '%s' doesn't exist or can't be accessed.`n", g_state.shader);
+    exit (1);
   }
-  if (g_fps <= 0 || g_fps >= 100) {
-     fprintf(stderr, "Framerate (%d) out of range [1-100].\n", g_fps);
-     exit(1);
-  }
-  if (access(g_shader,F_OK) != 0) {
-    fprintf(stderr, "File '%s' doesn't exist or can't be accessed.`n", g_shader);
-    exit(1);
-  }
-  if (access(g_shader,R_OK) != 0) {
-    fprintf(stderr, "File '%s' can't be read.`n", g_shader);
-    exit(1);
+  if (access (g_state.shader, R_OK) != 0) {
+    fprintf (stderr, "File '%s' can't be read.`n", g_state.shader);
+    exit (1);
   }
   
   // install signal handler
-  signal(SIGINT, sigint);
+  signal (SIGINT, sigint);
 
   // Creation de l'image utilisée pour le rendu
-  g_outfd = initout( g_out, g_width, g_height, g_pim );
+  initout (&g_state);
+  glinit (&g_state);
 
-  renderloop(g_width, g_height);
-
-  munmap(g_pim->pixels, nblk(g_width,g_height)*BLKSZ);
-  close(g_outfd);
+  banner ();
+  prompt ();
+  renderloop (&g_state);
+  
+  glfinish (&g_state);
   
   return 0;
 }

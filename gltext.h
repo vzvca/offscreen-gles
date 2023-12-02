@@ -1,3 +1,5 @@
+// Modified for GLES 24 nov 2023 vzvca
+
 
 // Repository: https://github.com/vallentin/glText
 // License: https://github.com/vallentin/glText/blob/master/LICENSE.md
@@ -43,9 +45,9 @@
 extern "C" {
 #endif
 
-#if !defined(__gl_h_) && !defined(__glcorearb_h_)
-#	error OpenGL header must be included prior to including glText header
-#endif
+  //#if !defined(__gl_h_) && !defined(__glcorearb_h_)
+  //#	error OpenGL header must be included prior to including glText header
+  //#endif
 
 #include <stdlib.h> /* malloc(), calloc(), free() */
 #include <string.h> /* memset(), memcpy(), strlen() */
@@ -802,11 +804,15 @@ GLT_API GLboolean gltInit(void)
 	if (gltInitialized)
 		return GL_TRUE;
 
-	if (!_gltCreateText2DShader())
+	if (!_gltCreateText2DShader()) {
+	  puts("shader failed");
 		return GL_FALSE;
+	}
 
-	if (!_gltCreateText2DFontTexture())
+	if (!_gltCreateText2DFontTexture()) {
+	  puts("texture failed");
 		return GL_FALSE;
+	}
 
 	gltInitialized = GL_TRUE;
 	return GL_TRUE;
@@ -830,14 +836,15 @@ GLT_API void gltTerminate(void)
 }
 
 static const GLchar* _gltText2DVertexShaderSource =
-"#version 330 core\n"
+"//#version 100\n"
+"precision mediump float;\n"
 "\n"
-"in vec2 position;\n"
-"in vec2 texCoord;\n"
+"attribute vec2 position;\n"
+"attribute vec2 texCoord;\n"
 "\n"
 "uniform mat4 mvp;\n"
 "\n"
-"out vec2 fTexCoord;\n"
+"varying vec2 fTexCoord;\n"
 "\n"
 "void main()\n"
 "{\n"
@@ -847,19 +854,21 @@ static const GLchar* _gltText2DVertexShaderSource =
 "}\n";
 
 static const GLchar* _gltText2DFragmentShaderSource =
-"#version 330 core\n"
+"//#version 100\n"
+"precision mediump float;\n"
 "\n"
-"out vec4 fragColor;\n"
+"//out vec4 fragColor;\n"
 "\n"
 "uniform sampler2D diffuse;\n"
 "\n"
-"uniform vec4 color = vec4(1.0, 1.0, 1.0, 1.0);\n"
+"uniform vec4 color;\n"
 "\n"
-"in vec2 fTexCoord;\n"
+"varying vec2 fTexCoord;\n"
 "\n"
 "void main()\n"
 "{\n"
-"	fragColor = texture(diffuse, fTexCoord) * color;\n"
+"       vec4 col;"
+"	gl_FragColor = texture2D(diffuse, fTexCoord) * color;\n"
 "}\n";
 
 GLT_API GLboolean _gltCreateText2DShader(void)
@@ -955,8 +964,6 @@ GLT_API GLboolean _gltCreateText2DShader(void)
 
 	glBindAttribLocation(_gltText2DShader, _GLT_TEXT2D_POSITION_LOCATION, "position");
 	glBindAttribLocation(_gltText2DShader, _GLT_TEXT2D_TEXCOORD_LOCATION, "texCoord");
-
-	glBindFragDataLocation(_gltText2DShader, 0, "fragColor");
 
 	glLinkProgram(_gltText2DShader);
 

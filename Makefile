@@ -4,7 +4,8 @@ all: Makefile offscreen sdl-win grab-png
 CFLAGS=-Wall -g3
 CXXFLAGS=-Wall
 
-offscreen: offscreen.c
+offscreen: gltext.h picol.h
+offscreen: offscreen.c 
 	$(CC) $(CFLAGS) -o $@ $< `pkg-config --libs --cflags glesv2 egl gbm`
 
 sdl-win: sdl-win.c
