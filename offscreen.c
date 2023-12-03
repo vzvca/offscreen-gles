@@ -127,6 +127,11 @@ struct state_s
   int colorspace;                 // RGB or YUV colorspace
   int mouse_x, mouse_y;           // current mouse position
   pid_t  pids[4];                 // array of pids to kill when fram ready
+
+  // Statistics
+  int nfr;                        // number of frames
+  int msecfr[16];                 // number of msec to compute a frame (last 16 frames window)
+  
 };
 
 state_t g_state;
@@ -151,6 +156,8 @@ picolResult cmd_fps (picolInterp *itp, int argc, const char *argv[], void *pd);
 picolResult cmd_mouse (picolInterp *itp, int argc, const char *argv[], void *pd);
 picolResult cmd_shader (picolInterp *itp, int argc, const char *argv[], void *pd);
 picolResult cmd_message (picolInterp *itp, int argc, const char *argv[], void *pd);
+picolResult cmd_stats (picolInterp *itp, int argc, const char *argv[], void *pd);
+void do_kill (state_t *st);
 
 
 // --------------------------------------------------------------------------
@@ -454,6 +461,7 @@ int glinit(state_t *st)
    picolRegisterCmd (st->itp, "kill", cmd_kill, st);
    picolRegisterCmd (st->itp, "shader", cmd_shader, st);
    picolRegisterCmd (st->itp, "message", cmd_message, st);
+   picolRegisterCmd (st->itp, "stats", cmd_stats, st);
    
    return 0;
 }
@@ -533,25 +541,23 @@ void prompt()
 // --------------------------------------------------------------------------
 //   Wait a few milliseconds keeping an eye on stdin
 // --------------------------------------------------------------------------
-int waitmsec (state_t *st, int msec)
+int waitmsec (state_t *st, struct timeval *start, int msec)
 {
-  struct timeval start, now;
+  struct timeval now;
   struct pollfd fds[1];
   int diff, ret;
 
-  gettimeofday (&start, NULL);
-  
   fds[0].fd = fileno(stdin);
   fds[0].events = POLLIN;
 
  again:
   // compute how log time to wait
   gettimeofday (&now, NULL);
-  diff = ((now.tv_sec - start.tv_sec)*1000000 + (now.tv_usec - start.tv_usec))/1000;
+  diff = ((now.tv_sec - start->tv_sec)*1000000 + (now.tv_usec - start->tv_usec))/1000;
   msec -= diff;
   if (msec <= 0) return 0;
   
-  ret = poll (fds, 1, msec - diff);
+  ret = poll (fds, 1, msec);
   if (ret > 0) {
     if (fds[0].revents & POLLIN) {
       char line[BLKSZ/4], *sline = line;
@@ -624,14 +630,19 @@ int waitmsec (state_t *st, int msec)
 // --------------------------------------------------------------------------
 int renderloop (state_t *st)
 {
-   /*
+  struct timeval start, now;
+  int diff;
+  
+  /*
     * Rendering loop
     */
    glViewport (0, 0, st->img.w, st->img.h);
    assertOpenGLError ("glViewport");
 
    GLfloat time = 0.0f;
+   gettimeofday (&start, NULL);
    while (!g_done) {
+     
       glClear (GL_COLOR_BUFFER_BIT);
       assertOpenGLError ("glClear");
 
@@ -651,9 +662,7 @@ int renderloop (state_t *st)
 
       // -- draw texture
       glBindVertexArray (st->vao);
-      assertOpenGLError ("glBindVertexArray");
       glDrawArrays (GL_TRIANGLE_STRIP, 0, 4);
-      assertOpenGLError ("glDrawArrays");
       glBindVertexArray (0);
       glUseProgram (0);
       
@@ -669,8 +678,25 @@ int renderloop (state_t *st)
       glFlush ();
       glReadPixels (0, 0, st->img.w, st->img.h, GL_RGBA, GL_UNSIGNED_BYTE, st->img.pixels);
 
-      waitmsec (st, 1000/st->fps);
-      time += 1.0/st->fps;
+      // -- send sigusr1 to tell new frame is ready
+      do_kill (st);
+
+      // -- compute time needed to generate frame
+      gettimeofday (&now, NULL);
+      diff = ((now.tv_sec - start.tv_sec)*1000000 + (now.tv_usec - start.tv_usec))/1000;
+      st->msecfr [st->nfr & 0x0f] = diff;
+      st->nfr++;
+
+      // -- adjust waiting time according to fps and to time needed to generate image
+      diff = 1000/st->fps - diff;
+      if (diff <= 0) diff = 1;
+      waitmsec (st, &now, diff);
+
+      // -- increment time counter for next image
+      gettimeofday (&now, NULL);
+      diff = ((now.tv_sec - start.tv_sec)*1000000 + (now.tv_usec - start.tv_usec))/1000;
+      start = now;
+      time += 0.001 * diff;
    }
 
    return 0;
@@ -679,16 +705,16 @@ int renderloop (state_t *st)
 // --------------------------------------------------------------------------
 //   Send kill signal to registered client process
 // --------------------------------------------------------------------------
-void do_kill ()
+void do_kill (state_t *st)
 {
   int i;
   for (i = 0; i < 4; ++i) {
-    if (g_state.pids[i] <= 0) continue;
-    if (kill (g_state.pids[i], 0) == -1) {
+    if (st->pids[i] <= 0) continue;
+    if (kill (st->pids[i], 0) == -1) {
       // target process dead maybe ? remove from table.
-      g_state.pids[i] = 0;
+      st->pids[i] = 0;
     }
-    else if (kill (g_state.pids[i], SIGUSR1) == -1) {
+    else if (kill (st->pids[i], SIGUSR1) == -1) {
       perror ("kill()");
       exit (1);
     }
@@ -744,6 +770,7 @@ picolResult cmd_help (picolInterp *itp, int argc, const char *argv[], void *pd)
       "message ?msg?" "\n"
       "mouse ?x y?" "\n"
       "shader ?/path/to/fragment-shader?" "\n"
+      "stats" "\n"
       "help ?topic?" "\n"
       "quit ?status?" "\n";
     return result (itp, PICOL_OK, helpmsg);
@@ -782,6 +809,16 @@ picolResult cmd_help (picolInterp *itp, int argc, const char *argv[], void *pd)
     if (!strcmp (argv[1], "shader")) {
       char *helpmsg =
 	"With no argument, returns current shader program. Otherwise changes shader program on the fly.";
+      return result (itp, PICOL_OK, helpmsg);
+    }
+    if (!strcmp (argv[1], "message")) {
+      char *helpmsg =
+	"With no argument, returns current displayed message. Otherwise changes displayed message.";
+      return result (itp, PICOL_OK, helpmsg);
+    }
+    if (!strcmp (argv[1], "stats")) {
+      char *helpmsg =
+	"Prints statistics.";
       return result (itp, PICOL_OK, helpmsg);
     }
   }
@@ -961,22 +998,45 @@ picolResult cmd_shader (picolInterp *itp, int argc, const char *argv[], void *pd
 picolResult cmd_message (picolInterp *itp, int argc, const char *argv[], void *pd)
 {
   state_t *state = pd;
-  
-  gltSetText (state->msg, argv[1]);
 
-  return PICOL_OK;
+  if (argc != 1 && argc != 2) {
+    return wrong_num_args (itp, 1, argv, "?msg?");
+  }
+  if (argc == 1) {
+    return result (itp, PICOL_OK, (char*) gltGetText (state->msg)); 
+  }
+  else {
+    gltSetText (state->msg, argv[1]);
+    return PICOL_OK;
+  }
 }
 
+// --------------------------------------------------------------------------
+//   Display statistics
+// --------------------------------------------------------------------------
+picolResult cmd_stats (picolInterp *itp, int argc, const char *argv[], void *pd)
+{
+  state_t *state = pd;
+  int m, i;
+  
+  if (argc != 1) {
+    return wrong_num_args (itp, 1, argv, "");
+  }
+  for (i = m = 0; i < 16; ++i) m += state->msecfr[i];
+  m /= 16;
+  return result (itp, PICOL_OK, "nframes %d msec per frame %d", state->nfr, m);
+}
 
 // --------------------------------------------------------------------------
 //   Command parser and evaluator
 // --------------------------------------------------------------------------
 int eval (state_t *st, char* cmd)
 {
-  picolEval (st->itp, cmd);
+  picolResult res = picolEval (st->itp, cmd);
   if (st->itp->result[0]) {
     puts (st->itp->result);
   }
+  return res;
 }
 
 // --------------------------------------------------------------------------
