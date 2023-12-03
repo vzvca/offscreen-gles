@@ -700,11 +700,13 @@ void do_kill ()
 // --------------------------------------------------------------------------
 int result (picolInterp *itp, int code, char *fmt, ...)
 {
+  char buf[BLKSZ];
   va_list va;
   va_start(va, fmt);
-  vprintf(fmt, va);
+  vsnprintf (buf, sizeof(buf), fmt, va);
+  buf[sizeof(buf)-1] = 0;
   va_end(va);
-  puts("");
+  picolSetResult (itp, buf);
   return code;
 }
 
@@ -971,8 +973,8 @@ picolResult cmd_message (picolInterp *itp, int argc, const char *argv[], void *p
 // --------------------------------------------------------------------------
 int eval (state_t *st, char* cmd)
 {
-  int res = picolEval (st->itp, cmd);
-  if (res != PICOL_OK) {
+  picolEval (st->itp, cmd);
+  if (st->itp->result[0]) {
     puts (st->itp->result);
   }
 }
