@@ -53,6 +53,20 @@ There are 3 distinct programs:
 
 ## Demo
 
+In a first terminal run `offscreen`:
+
+   $ ./offscreen -s shaders/voronoi.frag
+
+
+In a second terminal run `sdl-win` which will displayed an animated graphic:
+
+   $ ./sdl-win
+
+In the first terminal, the `offscreen` prompt `=>` is displayed.
+Type `help` to see the list of available commands and `help <<command>>` to get help on a specific command..
+
+Framerate and shader can be changed dynamically using `fps` and `shader` command.
+The message printed on the video can be changed using `message` command.
 
 
 ## Building
@@ -93,9 +107,9 @@ It is possible to use `sdl-win` too. It has been tested using `MobaXterm X11 ser
 
 * Add command interface to offscreen to allow:
 
-** dynamic change of shader
-** viewpoint change
-** ...
+   * dynamic change of shader
+   * viewpoint change
+   * ...
 
 * Add to **offscreen** the ability to send a signal to client programs when a frame is ready
 * Add circular buffer of frames. At least 2.
