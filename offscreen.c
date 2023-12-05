@@ -238,7 +238,9 @@ void assertEGLError (const char* msg) {
 // --------------------------------------------------------------------------
 GLuint mkshader (GLuint type, const char *src, GLint len)
 {
-   GLuint vsh = glCreateShader (type);
+  GLint cos, loglen;
+
+  GLuint vsh = glCreateShader (type);
    assertOpenGLError ("glCreateShader");
 
    if (len == -1) len = strlen (src);
@@ -246,15 +248,20 @@ GLuint mkshader (GLuint type, const char *src, GLint len)
    assertOpenGLError ("glShaderSource");
 
    glCompileShader (vsh);
-   assertOpenGLError ("glCompileShader");
-
-   char log[BLKSZ];
-   int  loglen = sizeof (log);
-   log[0] = 0;
-   glGetShaderInfoLog (vsh, sizeof(log), &loglen, log);
-   if (loglen) {
-      puts ("Shader compilation log:");
-      puts (log);
+   
+   glGetShaderiv(vsh, GL_COMPILE_STATUS, &cos);
+   if (cos != GL_TRUE) {
+     glGetShaderiv(vsh, GL_INFO_LOG_LENGTH, &loglen);
+     if (loglen > 1) {
+       loglen *= sizeof(GLchar);
+       GLchar *log = (GLchar*)malloc(loglen);
+			
+       glGetShaderInfoLog(vsh, loglen, NULL, log);
+       printf("Shader #%u <Info Log>:\n%s\n", vsh, log);
+       free(log);
+     }
+     glDeleteShader(vsh);
+     exit (1);
    }
 
    return vsh;
@@ -310,7 +317,7 @@ GLuint mkprog (state_t *st, GLuint vsh, GLuint fsh)
       printf("Program #%u <Info Log>:\n%s\n", st->prog, log);
       free(log);
     }
-    assertOpenGLError ("glLinkProgram");
+    exit (1);
   }
 
   glUseProgram (st->prog);
