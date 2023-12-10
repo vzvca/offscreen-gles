@@ -9,6 +9,15 @@ precision mediump float;
 // glslsandbox uniforms
 uniform float time;
 uniform vec2 resolution;
+uniform int   colorspace;
+
+#define YUV 1
+#define RGB 0
+
+const mat4 rgb2yuv = mat4(0.2990, -0.1687,  0.5000, 0.000, // 1st column, R
+                          0.5870,  0.3313,  0.4187, 0.000, // 2nd column, G
+		          0.1140,  0.5000, -0.0813, 0.000, // 3rd column, B
+		          0.0000,  0.5000,  0.5000, 1.000);
 
 // shadertoy emulation
 #define iTime time
@@ -125,6 +134,11 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord ) {
 	vec4 col = pow(vec4(rm.y/100.0),vec4(3.0))+pow(rm.x/MAX_DIST,2.5);
     // Gamma correction
 	fragColor = pow(col, vec4(1.0/9.2));
+
+    if (colorspace == YUV) {
+        fragColor /= fragColor.w;
+	fragColor = rgb2yuv*fragColor;
+    }
 }
 // --------[ Original ShaderToy ends here ]---------- //
 

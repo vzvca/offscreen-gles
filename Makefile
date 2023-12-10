@@ -1,5 +1,5 @@
 
-all: Makefile offscreen sdl-win grab-png
+all: Makefile offscreen sdl-win grab-png grab-jpeg
 
 CFLAGS=-Wall -g3
 CXXFLAGS=-Wall
@@ -14,9 +14,16 @@ sdl-win: sdl-win.c
 grab-png: grab-png.c
 	$(CC) $(CFLAGS) -o $@ $< -lpng
 
+jpegenc.c: jpegenc_utils.h
+	@touch $@
+
+grab-jpeg: jpegenc.c va_display_drm.c
+	$(CC) $(CFLAGS) $^ -I /usr/include/libdrm -o $@ -lva -lva-drm -ldrm -g3
+
 clean:
 	-rm -f offscreen
 	-rm -f sdl-win
 	-rm -f grab-png
+	-rm -f grab-jpeg
 
 .PHONY: clean

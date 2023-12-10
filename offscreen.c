@@ -119,6 +119,7 @@ struct state_s
   GLint  u_time;                  // uniform
   GLint  u_mouse;                 // uniform
   GLint  u_resolution;            // uniform
+  GLint  u_colorspace;            // uniform
   GLTtext *msg;                   // message to display
   GLuint prog;                    // current GLSLprogram
 
@@ -335,7 +336,8 @@ GLuint mkprog (state_t *st, GLuint vsh, GLuint fsh)
    st->u_time = glGetUniformLocation (st->prog, "time");
    st->u_mouse = glGetUniformLocation (st->prog, "mouse");
    st->u_resolution = glGetUniformLocation (st->prog, "resolution");
-
+   st->u_colorspace = glGetUniformLocation (st->prog, "colorspace");
+   
    return st->prog;
 }
 
@@ -666,6 +668,9 @@ int renderloop (state_t *st)
       if (st->u_mouse != -1) {
 	glUniform2f (st->u_mouse, (GLfloat) st->mouse_x, (GLfloat) st->mouse_y);
       }
+      if (st->u_colorspace != -1) {
+	glUniform1i (st->u_colorspace, st->colorspace);
+      }
 
       // -- draw texture
       glBindVertexArray (st->vao);
@@ -676,7 +681,7 @@ int renderloop (state_t *st)
       // -- draw text
       gltBeginDraw ();
       gltViewport (st->img.w, st->img.h);
-      gltColor (1.0f, 1.0f, 0.0f, 0.2f);
+      gltColor (0.0f, 0.0f, 1.0f, 1.0f);
       gltDrawText2D (st->msg, 0.0f, 0.0f, 1.5f); // x=0.0, y=0.0, scale=1.0
       gltEndDraw ();
       glUseProgram (0);
@@ -955,9 +960,11 @@ picolResult cmd_colorspace (picolInterp *itp, int argc, const char *argv[], void
     }
     if (!strcmp (argv[1], "yuv")) {
       state->colorspace = YUV;
+      gltColorspace (GLT_COL_YUV);
     }
     if (!strcmp (argv[1], "rgb")) {
       state->colorspace = RGB;
+      gltColorspace (GLT_COL_RGB);
     }
     return PICOL_OK;
   }
@@ -1087,7 +1094,7 @@ int main(int argc, char **argv)
   g_state.shader = strdup (DEF_SHADER);
   g_state.out = DEF_OUTPUT;
   
-  while ((opt = getopt (argc, argv, "?ho:w:f:s:")) != -1 ) {
+  while ((opt = getopt (argc, argv, "?h:o:w:f:s:")) != -1 ) {
     switch( opt ) {
     case '?':  usage (argc, argv, 0);
     case 'w':  g_state.img.w = atoi (optarg); break;

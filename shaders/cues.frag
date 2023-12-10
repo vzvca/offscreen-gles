@@ -9,7 +9,17 @@ precision highp float;
 
 uniform vec2 resolution;
 uniform float time;
-//@vca uniform vec2 mouse;
+uniform vec2 mouse;
+
+uniform int   colorspace;
+
+#define YUV 1
+#define RGB 0
+
+const mat4 rgb2yuv = mat4(0.2990, -0.1687,  0.5000, 0.000, // 1st column, R
+                          0.5870,  0.3313,  0.4187, 0.000, // 2nd column, G
+		          0.1140,  0.5000, -0.0813, 0.000, // 3rd column, B
+		          0.0000,  0.5000,  0.5000, 1.000);
 
 //Util Start
 float PI=3.14159265;
@@ -192,5 +202,5 @@ void main(void){
   }
   c2=c2*max(1.0-f*.1,0.0);
   gl_FragColor=vec4(c1.xyz*0.75+c2.xyz*0.25,1.0);
-  
+  if (colorspace == YUV) gl_FragColor = rgb2yuv*gl_FragColor;  
 }

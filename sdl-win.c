@@ -80,7 +80,7 @@ ThreadFunc(void *data)
   }
   puts("The output file was opened successfully.");
   pixels = (char *)mmap(0, g_width*g_height*4, PROT_READ, MAP_SHARED, fbfd, 0);
-  if (*(int*)pixels == -1) {
+  if ((int)pixels == -1) {
     perror("Error: failed to map output file to memory");
     exit(1);
   }

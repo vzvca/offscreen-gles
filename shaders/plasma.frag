@@ -14,18 +14,18 @@ precision mediump float;
 //#extension GL_OES_standard_derivatives : enable 
 
 uniform float time;
-uniform vec2 mouse;
-uniform vec2 resolution;
+uniform vec2  mouse;
+uniform vec2  resolution;
+uniform int   colorspace;
 
-vec4 ycbcr(in vec4 col)
-{
-  vec4 yuv;
-  yuv.r = 0.0 + 0.2990*col.r + 0.5870*col.g + 0.1140*col.b;
-  yuv.g = 0.5 - 0.1687*col.r - 0.3313*col.g + 0.5000*col.b;
-  yuv.b = 0.5 + 0.5000*col.r - 0.4187*col.g - 0.0813*col.b;
-  yuv.a = 1.0;
-  return yuv;
-}
+#define YUV 1
+#define RGB 0
+
+const mat4 rgb2yuv = mat4(0.2990, -0.1687,  0.5000, 0.000, // 1st column, R
+                          0.5870,  0.3313,  0.4187, 0.000, // 2nd column, G
+		          0.1140,  0.5000, -0.0813, 0.000, // 3rd column, B
+		          0.0000,  0.5000,  0.5000, 1.000);
+
 
 float plasma(vec2 p, float iso, float fade)
 {
@@ -64,4 +64,7 @@ void main( void ) {
 		if (c> 0.001) break;
 	}
 	gl_FragColor = vec4(c * pos.x, c * pos.y, c * abs(pos.x + pos.y), 0.5) * 2.0;
+	if (colorspace == YUV) {
+	   gl_FragColor = rgb2yuv * gl_FragColor;
+	}
 }
