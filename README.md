@@ -99,12 +99,16 @@ For the moment, only 4CC RGBA is supported. But it is not real RGBA, you need to
 
 In a first terminal run `offscreen`:
 
-   $ ./offscreen -s shaders/voronoi.frag
+   $ ./offscreen -w 800 -h 600 -s shaders/voronoi.frag
 
 
 In a second terminal run `sdl-win` which will displayed an animated graphic:
 
-   $ ./sdl-win
+   $ ./sdl-win -w 800 -h 600
+
+You should see something like this:
+
+![voronoi shader](images/image-1.png)
 
 In the first terminal, the `offscreen` prompt `=>` is displayed.
 Type `help` to see the list of available commands and `help <<command>>` to get help on a specific command..
