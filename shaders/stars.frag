@@ -242,7 +242,7 @@ void main()
 	
 	gl_FragColor = forCol2 + vec4(backCol2, 1.0);
 	if (colorspace == YUV) {
-	   gl_FragColor /= gl_FragColor*w;
+	   gl_FragColor /= gl_FragColor.w;
 	   gl_FragColor = rgb2yuv*gl_FragColor;
 	}
 }
