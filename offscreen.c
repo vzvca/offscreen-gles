@@ -681,7 +681,7 @@ int renderloop (state_t *st)
       // -- draw text
       gltBeginDraw ();
       gltViewport (st->img.w, st->img.h);
-      gltColor (0.0f, 0.0f, 1.0f, 1.0f);
+      gltColor (0.0f, 1.0f, 0.0f, 1.0f);
       gltDrawText2D (st->msg, 0.0f, 0.0f, 1.5f); // x=0.0, y=0.0, scale=1.0
       gltEndDraw ();
       glUseProgram (0);

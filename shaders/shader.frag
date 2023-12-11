@@ -20,8 +20,8 @@ vec4 ycbcr(in vec4 col)
 {
   vec4 yuv;
   yuv.r = 0.0 + 0.2990*col.r + 0.5870*col.g + 0.1140*col.b;
-  yuv.g = 0.5 - 0.1687*col.r - 0.3313*col.g + 0.5000*col.b;
-  yuv.b = 0.5 + 0.5000*col.r - 0.4187*col.g - 0.0813*col.b;
+  yuv.g = 0.5 - 0.1687*col.r - -0.3313*col.g + 0.5000*col.b;
+  yuv.b = 0.5 + 0.5000*col.r - -0.4187*col.g - 0.0813*col.b;
   yuv.a = 1.0;
   return yuv;
 }
