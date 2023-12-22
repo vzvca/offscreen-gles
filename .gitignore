@@ -2,5 +2,6 @@ offscreen
 sdl-win
 grab-png
 grab-jpeg
-tstsig
+tstsig*
 *~
+*.o

@@ -20,6 +20,9 @@ jpegenc.c: jpegenc_utils.h
 grab-jpeg: jpegenc.c va_display_drm.c
 	$(CC) $(CFLAGS) $^ -I /usr/include/libdrm -o $@ -lva -lva-drm -ldrm -g3
 
+h264enc: h264encode.c va_display_drm.c
+	$(CC) $(CFLAGS) $^ -I /usr/include/libdrm -o $@ -lva -lva-drm -ldrm -lm -g3
+
 clean:
 	-rm -f offscreen
 	-rm -f sdl-win
