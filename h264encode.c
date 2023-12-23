@@ -619,6 +619,20 @@ void encoding2display_order(
 
 
 // -----------------------------------------------------------------------------
+//  Get friendly string rep for frame type
+// -----------------------------------------------------------------------------
+static char* get_frame_type (int ft)
+{
+  switch (ft) {
+  case FRAME_P: return "P";
+  case FRAME_B: return "B";
+  case FRAME_I: return "I";
+  case FRAME_IDR: return "IDR";
+  default: return "UNK";
+  }
+}
+
+// -----------------------------------------------------------------------------
 //  Convert 4CC to string
 // -----------------------------------------------------------------------------
 static char *fourcc_to_string(int fourcc)
@@ -711,7 +725,7 @@ static int string_to_rc(char *str)
 
 
 // -----------------------------------------------------------------------------
-//
+//  
 // -----------------------------------------------------------------------------
 static int print_help(void)
 {
@@ -930,7 +944,7 @@ static int process_cmdline(int argc, char *argv[])
 // -----------------------------------------------------------------------------
 static int init_va(void)
 {
-  VAProfile profile_list[] = {VAProfileH264ConstrainedBaseline, VAProfileH264High, VAProfileH264Main, VAProfileH264ConstrainedBaseline};
+  VAProfile profile_list[] = {VAProfileH264High, VAProfileH264Main, VAProfileH264ConstrainedBaseline};
     VAEntrypoint *entrypoints;
     int num_entrypoints, slice_entrypoint;
     int support_encode = 0;
@@ -978,9 +992,6 @@ static int init_va(void)
         }
     }
 
-    // @todo: force another way
-    h264_profile = VAProfileH264ConstrainedBaseline;
-    
     if (support_encode == 0) {
         printf("Can't find VAEntrypointEncSlice or  VAEntrypointEncSliceLP for H264 profiles\n");
         exit(1);
@@ -1687,68 +1698,11 @@ static int render_slice(void)
 
 
 // -----------------------------------------------------------------------------
-//
-// -----------------------------------------------------------------------------
-static int load_surface(VASurfaceID surface_id, unsigned long long display_order)
-{
-    unsigned char *srcyuv_ptr = NULL, *src_Y = NULL, *src_U = NULL, *src_V = NULL;
-    unsigned long long frame_start, mmap_start;
-    char *mmap_ptr = NULL;
-    int frame_size, mmap_size;
-
-    if (srcyuv_fp == NULL)
-        return 0;
-
-    /* allow encoding more than srcyuv_frames */
-    display_order = display_order % srcyuv_frames;
-    frame_size = frame_width * frame_height * 3 / 2; /* for YUV420 */
-    frame_start = display_order * frame_size;
-
-    mmap_start = frame_start & (~0xfff);
-    mmap_size = (frame_size + (frame_start & 0xfff) + 0xfff) & (~0xfff);
-    mmap_ptr = mmap(0, mmap_size, PROT_READ, MAP_SHARED,
-                    fileno(srcyuv_fp), mmap_start);
-    if (mmap_ptr == MAP_FAILED) {
-        printf("Failed to mmap YUV file (%s)\n", strerror(errno));
-        return 1;
-    }
-    srcyuv_ptr = (unsigned char *)mmap_ptr + (frame_start & 0xfff);
-    if (srcyuv_fourcc == VA_FOURCC_NV12) {
-        src_Y = srcyuv_ptr;
-        src_U = src_Y + frame_width * frame_height;
-        src_V = NULL;
-    } else if (srcyuv_fourcc == VA_FOURCC_IYUV ||
-               srcyuv_fourcc == VA_FOURCC_YV12) {
-        src_Y = srcyuv_ptr;
-        if (srcyuv_fourcc == VA_FOURCC_IYUV) {
-            src_U = src_Y + frame_width * frame_height;
-            src_V = src_U + (frame_width / 2) * (frame_height / 2);
-        } else { /* YV12 */
-            src_V = src_Y + frame_width * frame_height;
-            src_U = src_V + (frame_width / 2) * (frame_height / 2);
-        }
-    } else {
-        printf("Unsupported source YUV format\n");
-        if (mmap_ptr)
-            munmap(mmap_ptr, mmap_size);
-        exit(1);
-    }
-
-    upload_surface_yuv(va_dpy, surface_id,
-                       srcyuv_fourcc, frame_width, frame_height,
-                       src_Y, src_U, src_V);
-    if (mmap_ptr)
-        munmap(mmap_ptr, mmap_size);
-
-    return 0;
-}
-
-
-// -----------------------------------------------------------------------------
 //   Save h264 encoded vide
 // -----------------------------------------------------------------------------
 static int save_codeddata(unsigned long long display_order, unsigned long long encode_order)
 {
+  static char *progress = "|/-\\";
     VACodedBufferSegment *buf_list = NULL;
     VAStatus va_status;
     unsigned int coded_size = 0;
@@ -1763,25 +1717,13 @@ static int save_codeddata(unsigned long long display_order, unsigned long long e
     }
     vaUnmapBuffer(va_dpy, coded_buf[display_order % SURFACE_NUM]);
 
-    #if 0
     printf("\r      "); /* return back to startpoint */
-    switch (encode_order % 4) {
-    case 0:
-        printf("|");
-        break;
-    case 1:
-        printf("/");
-        break;
-    case 2:
-        printf("-");
-        break;
-    case 3:
-        printf("\\");
-        break;
-    }
+    printf ("%c", progress[encode_order % 4]);
+    printf ("%5s", get_frame_type (current_frame_type));
     printf("%08lld", encode_order);
     printf("(%06d bytes coded)", coded_size);
-#endif
+    fflush (stdout);
+    
     fflush(coded_fp);
 
     return 0;
@@ -1806,20 +1748,6 @@ static void storage_task(unsigned long long display_order, unsigned long long en
 }
 
 
-// -----------------------------------------------------------------------------
-//  Get friendly string rep for frame type
-// -----------------------------------------------------------------------------
-static char* get_frame_type (int ft)
-{
-  switch (ft) {
-  case FRAME_P: return "P";
-  case FRAME_B: return "B";
-  case FRAME_I: return "I";
-  case FRAME_IDR: return "IDR";
-  default: return "UNK";
-  }
-}
-
 /* --------------------------------------------------------------------------
  *  NV12 conversion
  *  in nv12 u and v are w/2*h/2 and interleaved
@@ -1827,13 +1755,14 @@ static char* get_frame_type (int ft)
 void tfnv12 (int w, int h, unsigned char *rgba, unsigned char *y, unsigned char *uv)
 {
   unsigned short ru[w], rv[w];
-  unsigned char *prgba = rgba, *py = y, *puv = uv;
+  unsigned char *prgba, *py = y, *puv = uv;
   int l, c, ww = w>>1;
 
   memset (ru, 0, sizeof(ru));
   memset (rv, 0, sizeof(rv));
 
   for (l = 0; l < h; ++l) {
+    prgba = rgba + (h-l)*w*4;
     for (c = 0; c < w; ++c) {
       // original 4 bytes pixels are YUVA
       *py++ = *prgba++;
@@ -1860,9 +1789,19 @@ static int _done = 0;
  *  When an image is ready to be downloaded current process get signaled
  *  with SIGUSR1
  * --------------------------------------------------------------------------*/
-void sigusr1 (int dummy)
+static void sigusr1 (int dummy)
 {
   _sigusr1 = 1;
+}
+
+/* --------------------------------------------------------------------------
+ *  Signal handler
+ *  When an image is ready to be downloaded current process get signaled
+ *  with SIGINT
+ * --------------------------------------------------------------------------*/
+static void sigint (int dummy)
+{
+  _done = 1;
 }
 
 /* --------------------------------------------------------------------------
@@ -1885,7 +1824,7 @@ static int waitforimage ()
       }
     }
     else {
-      break; // <-- temporaire pour test
+      //break; // <-- temporaire pour test
     }
   }
 }
@@ -1910,16 +1849,7 @@ static int encode_loop ()
     // compute this frame type
     encoding2display_order(current_frame_encoding, intra_period, intra_idr_period, ip_period,
                            &current_frame_display, &current_frame_type);
-#if 0
-    current_frame_type = FRAME_P;
-    if (current_fr % period == 0)
-      current_frame_type = FRAME_IDR;
-#endif
     
-    // print current frame type
-    printf ("%s", get_frame_type (current_frame_type));
-    printf ((current_frame_encoding % 20 == 0) ? "\n" : " ");
-
     // load image
     tmp = GetTickCount ();
     upload_surface_yuv (va_dpy, src_surface[current_slot], VA_FOURCC_NV12, frame_width, frame_height,
@@ -1965,82 +1895,6 @@ static int encode_loop ()
     update_ReferenceFrames();
   }
   return 0;
-}
-
-
-// -----------------------------------------------------------------------------
-//
-// -----------------------------------------------------------------------------
-static int encode_frames(void)
-{
-    unsigned int i, tmp;
-    VAStatus va_status;
-    //VASurfaceStatus surface_status;
-
-    /* upload RAW YUV data into all surfaces */
-    tmp = GetTickCount();
-    for (i = 0; i < SURFACE_NUM; i++)
-      load_surface(src_surface[i], i);
-    UploadPictureTicks += GetTickCount() - tmp;
-
-    /* ready for encoding */
-    memset(srcsurface_status, SRC_SURFACE_IN_ENCODING, sizeof(srcsurface_status));
-
-    memset(&seq_param, 0, sizeof(seq_param));
-    memset(&pic_param, 0, sizeof(pic_param));
-    memset(&slice_param, 0, sizeof(slice_param));
-
-    for (current_frame_encoding = 0; current_frame_encoding < frame_count; current_frame_encoding++) {
-        encoding2display_order(current_frame_encoding, intra_period, intra_idr_period, ip_period,
-                               &current_frame_display, &current_frame_type);
-
-        printf ("%s ", get_frame_type (current_frame_type));
-        if (current_frame_encoding % 20 == 0) printf("\n");
-        
-        if (current_frame_type == FRAME_IDR) {
-            numShortTerm = 0;
-            current_frame_num = 0;
-            current_IDR_display = current_frame_display;
-        }
-
-        tmp = GetTickCount();
-        va_status = vaBeginPicture(va_dpy, context_id, src_surface[current_slot]);
-        CHECK_VASTATUS(va_status, "vaBeginPicture");
-        BeginPictureTicks += GetTickCount() - tmp;
-
-        tmp = GetTickCount();
-        if (current_frame_type == FRAME_IDR) {
-            render_sequence();
-            render_picture();
-            if (h264_packedheader) {
-                render_packedsequence();
-                render_packedpicture();
-            }
-        } else {
-            render_picture();
-        }
-        render_slice();
-        RenderPictureTicks += GetTickCount() - tmp;
-
-        tmp = GetTickCount();
-        va_status = vaEndPicture(va_dpy, context_id);
-        CHECK_VASTATUS(va_status, "vaEndPicture");;
-        EndPictureTicks += GetTickCount() - tmp;
-
-        storage_task(current_frame_display, current_frame_encoding);
-
-        /* reload a new frame data */
-        tmp = GetTickCount();
-        if (srcyuv_fp != NULL)
-          load_surface(src_surface[current_frame_display % SURFACE_NUM], current_frame_display + SURFACE_NUM);
-        UploadPictureTicks += GetTickCount() - tmp;    
-        srcsurface_status[current_frame_display % SURFACE_NUM] = SRC_SURFACE_IN_ENCODING;
-
-        update_ReferenceFrames();
-    }
-
-
-    return 0;
 }
 
 
@@ -2164,7 +2018,9 @@ int main(int argc, char **argv)
     init_va();
     setup_encode();
 
-    //encode_frames();
+    signal (SIGUSR1, sigusr1);
+    signal (SIGINT, sigint);
+    
     encode_loop();
     
     release_encode();
