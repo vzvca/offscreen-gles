@@ -5,3 +5,4 @@ grab-jpeg
 tstsig*
 *~
 *.o
+h264enc
