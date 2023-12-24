@@ -2,7 +2,8 @@ offscreen
 sdl-win
 grab-png
 grab-jpeg
+h264enc
 tstsig*
 *~
 *.o
-h264enc
+*.264

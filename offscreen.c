@@ -158,6 +158,7 @@ picolResult cmd_mouse (picolInterp *itp, int argc, const char *argv[], void *pd)
 picolResult cmd_shader (picolInterp *itp, int argc, const char *argv[], void *pd);
 picolResult cmd_message (picolInterp *itp, int argc, const char *argv[], void *pd);
 picolResult cmd_stats (picolInterp *itp, int argc, const char *argv[], void *pd);
+picolResult cmd_execbg (picolInterp *itp, int argc, const char *argv[], void *pd);
 void do_kill (state_t *st);
 
 
@@ -471,6 +472,7 @@ int glinit(state_t *st)
    picolRegisterCmd (st->itp, "shader", cmd_shader, st);
    picolRegisterCmd (st->itp, "message", cmd_message, st);
    picolRegisterCmd (st->itp, "stats", cmd_stats, st);
+   picolRegisterCmd (st->itp, "execbg", cmd_execbg, st);
    
    return 0;
 }
@@ -1039,6 +1041,37 @@ picolResult cmd_stats (picolInterp *itp, int argc, const char *argv[], void *pd)
   for (i = m = 0; i < 16; ++i) m += state->msecfr[i];
   m /= 16;
   return result (itp, PICOL_OK, "nframes %d msec per frame %d", state->nfr, m);
+}
+
+// --------------------------------------------------------------------------
+//   execute command in background
+// --------------------------------------------------------------------------
+picolResult cmd_execbg (picolInterp *itp, int argc, const char *argv[], void *pd)
+{
+  pid_t pid;
+  
+  if (argc < 2) {
+    return wrong_num_args (itp, 1, argv, "command ?arg1? ... ?argn?");
+  }
+  pid = fork ();
+  if (pid == -1) {
+    return result (itp, PICOL_ERR, "fork() failed: %s", strerror (errno));
+  }
+  if (pid != 0) {
+    // parent
+    return result (itp, PICOL_OK, "%d", pid);
+  }
+  else {
+    // child
+    int i;
+    for (i = 1; i < argc; ++i) argv[i-1] = argv[i];
+    argv[argc-1] = NULL;
+    execvp (argv[0], (char* const*) argv);
+    // returns only on error
+    fprintf (stderr, "execvp() failed: %s\n", strerror (errno));
+    exit (1);
+  }
+  return PICOL_OK;
 }
 
 // --------------------------------------------------------------------------
