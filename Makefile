@@ -1,32 +1,39 @@
 
 all: Makefile offscreen sdl-win grab-png grab-jpeg
 
-CFLAGS=-Wall -g3
-CXXFLAGS=-Wall
+CFLAGS=-Wall -g3 -I /usr/include/libdrm
 
-offscreen: gltext.h picol.h
-offscreen: offscreen.c 
-	$(CC) $(CFLAGS) -o $@ $< `pkg-config --libs --cflags glesv2 egl gbm`
+init.c: init.picol
+	awk 'BEGIN {print "char *inititp ="} {print "\"" $$0 "\\n\""} END {print ";"}' < $< > $@
 
-sdl-win: sdl-win.c
-	$(CC) $(CFLAGS) -o $@ $< `sdl2-config --cflags --libs`
+offscreen: gltext.h picol.h Makefile
+offscreen: offscreen.o init.o
+	$(CC) -o $@ offscreen.o init.o `pkg-config --libs --cflags glesv2 egl gbm`
 
-grab-png: grab-png.c
-	$(CC) $(CFLAGS) -o $@ $< -lpng
+sdl-win: Makefile
+sdl-win: sdl-win.o
+	$(CC) -o $@ $< `sdl2-config --cflags --libs`
+
+grab-png: Makefile
+grab-png: grab-png.o
+	$(CC) -o $@ $< -lpng
 
 jpegenc.c: jpegenc_utils.h
 	@touch $@
 
-grab-jpeg: jpegenc.c va_display_drm.c
-	$(CC) $(CFLAGS) $^ -I /usr/include/libdrm -o $@ -lva -lva-drm -ldrm -g3
+grab-png: Makefile
+grab-jpeg: jpegenc.o va_display_drm.o
+	$(CC) $(CFLAGS) jpegenc.o va_display_drm.o   -o $@ -lva -lva-drm -ldrm
 
-h264enc: h264encode.c va_display_drm.c
-	$(CC) $(CFLAGS) $^ -I /usr/include/libdrm -o $@ -lva -lva-drm -ldrm -lm -g3
+h264enc: h264encode.o va_display_drm.o
+	$(CC) $(CFLAGS) h264encode.o va_display_drm.o -o $@ -lva -lva-drm -ldrm -lm
 
 clean:
+	-rm *o
 	-rm -f offscreen
 	-rm -f sdl-win
 	-rm -f grab-png
 	-rm -f grab-jpeg
+	-rm -f h264enc
 
 .PHONY: clean

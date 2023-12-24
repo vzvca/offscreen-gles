@@ -1,0 +1,23 @@
+# -----------------------------------------------------------------------------
+#   Initialisation script for offscreen command interpreter
+#   Creates proc to take snapshot and record video
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+#   Takes a picture of current frame
+# -----------------------------------------------------------------------------
+proc image {type fout} {
+    set w [width]
+    set h [height]
+    set pid [execbg ./image-$type -w $w -h $h -o $fout]
+    kill add $pid
+}
+
+# -----------------------------------------------------------------------------
+#   Video recording
+# -----------------------------------------------------------------------------
+proc video {type fout nframes} {
+    set w [width]
+    set h [height]
+    set pid [execbg ./video-$type -w $w -h $h -n $nframes -o $fout]
+}

@@ -131,8 +131,7 @@ struct state_s
 
   // Statistics
   int nfr;                        // number of frames
-  int msecfr[16];                 // number of msec to compute a frame (last 16 frames window)
-  
+  int msecfr[16];                 // number of msec to compute a frame (last 16 frames window)  
 };
 
 state_t g_state;
@@ -159,8 +158,14 @@ picolResult cmd_shader (picolInterp *itp, int argc, const char *argv[], void *pd
 picolResult cmd_message (picolInterp *itp, int argc, const char *argv[], void *pd);
 picolResult cmd_stats (picolInterp *itp, int argc, const char *argv[], void *pd);
 picolResult cmd_execbg (picolInterp *itp, int argc, const char *argv[], void *pd);
+picolResult cmd_width (picolInterp *itp, int argc, const char *argv[], void *pd);
+picolResult cmd_height (picolInterp *itp, int argc, const char *argv[], void *pd);
 void do_kill (state_t *st);
 
+// --------------------------------------------------------------------------
+//   External
+// --------------------------------------------------------------------------
+extern char *inititp;
 
 // --------------------------------------------------------------------------
 //   Helper func
@@ -473,6 +478,13 @@ int glinit(state_t *st)
    picolRegisterCmd (st->itp, "message", cmd_message, st);
    picolRegisterCmd (st->itp, "stats", cmd_stats, st);
    picolRegisterCmd (st->itp, "execbg", cmd_execbg, st);
+   picolRegisterCmd (st->itp, "width", cmd_width, st);
+   picolRegisterCmd (st->itp, "height", cmd_height, st);
+   
+   if (picolEval (st->itp, inititp) != PICOL_OK) {
+     fprintf (stderr, "Interpreter init failed.\n");
+     exit (1);
+   }
    
    return 0;
 }
@@ -1072,6 +1084,32 @@ picolResult cmd_execbg (picolInterp *itp, int argc, const char *argv[], void *pd
     exit (1);
   }
   return PICOL_OK;
+}
+
+// --------------------------------------------------------------------------
+//   Retrieve width
+// --------------------------------------------------------------------------
+picolResult cmd_width (picolInterp *itp, int argc, const char *argv[], void *pd)
+{
+  state_t *state = pd;
+  
+  if (argc != 1) {
+    return wrong_num_args (itp, 1, argv, "");
+  }
+  return result (itp, PICOL_OK, "%d", state->img.w);
+}
+
+// --------------------------------------------------------------------------
+//   Retrieve height
+// --------------------------------------------------------------------------
+picolResult cmd_height (picolInterp *itp, int argc, const char *argv[], void *pd)
+{
+  state_t *state = pd;
+  
+  if (argc != 1) {
+    return wrong_num_args (itp, 1, argv, "");
+  }
+  return result (itp, PICOL_OK, "%d", state->img.h);
 }
 
 // --------------------------------------------------------------------------
