@@ -1807,10 +1807,10 @@ static void sigint (int dummy)
 /* --------------------------------------------------------------------------
  *  Wait for an image to arrive
  * --------------------------------------------------------------------------*/
-static int waitforimage ()
+static void waitforimage ()
 {
   while (!_done) {
-    if (usleep (50000) == -1) {
+    if (usleep (500000) == -1) {
       if (errno == EINTR) {
         if (_sigusr1) { 
           _sigusr1 = 0;
@@ -1840,6 +1840,7 @@ static int encode_loop ()
   for (current_frame_encoding = 0; current_frame_encoding < frame_count; current_frame_encoding++) {
     // wait for an image to be ready
     waitforimage ();
+    if (_done) break;
 
     // process image
     tmp = GetTickCount ();
@@ -2013,14 +2014,16 @@ int main(int argc, char **argv)
 
     print_input();
 
-    start = GetTickCount();
 
     init_va();
     setup_encode();
 
     signal (SIGUSR1, sigusr1);
     signal (SIGINT, sigint);
-    
+
+    waitforimage ();
+    start = GetTickCount();
+
     encode_loop();
     
     release_encode();

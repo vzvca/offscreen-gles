@@ -121,6 +121,7 @@ struct state_s
   GLint  u_resolution;            // uniform
   GLint  u_colorspace;            // uniform
   GLTtext *msg;                   // message to display
+  char  *smsg;                    // string content of message
   GLuint prog;                    // current GLSLprogram
 
   int fps;                        // video framerate
@@ -452,7 +453,7 @@ int glinit(state_t *st)
      exit(1);
    }
    st->msg = gltCreateText();
-   gltSetText(st->msg, "Hello \nWorld!");
+   st->smsg = strdup ("[clock format [clock seconds]]");
    
    /*
     * Compile shader
@@ -696,7 +697,12 @@ int renderloop (state_t *st)
       gltBeginDraw ();
       gltViewport (st->img.w, st->img.h);
       gltColor (0.0f, 1.0f, 0.0f, 1.0f);
-      gltDrawText2D (st->msg, 0.0f, 0.0f, 1.5f); // x=0.0, y=0.0, scale=1.0
+      char buf[256];
+      sprintf (buf, "join [subst {%s}]", st->smsg);
+      if (picolEval (st->itp, buf) == PICOL_OK) {
+	gltSetText(st->msg, st->itp->result);
+	gltDrawText2D (st->msg, 0.0f, 0.0f, 1.0f); // x=0.0, y=0.0, scale=1.0
+      }
       gltEndDraw ();
       glUseProgram (0);
 
@@ -1031,10 +1037,10 @@ picolResult cmd_message (picolInterp *itp, int argc, const char *argv[], void *p
     return wrong_num_args (itp, 1, argv, "?msg?");
   }
   if (argc == 1) {
-    return result (itp, PICOL_OK, (char*) gltGetText (state->msg)); 
+    return result (itp, PICOL_OK, state->smsg); 
   }
   else {
-    gltSetText (state->msg, argv[1]);
+    state->smsg = strdup (argv[1]);
     return PICOL_OK;
   }
 }

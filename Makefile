@@ -1,5 +1,5 @@
 
-all: Makefile offscreen sdl-win grab-png grab-jpeg
+all: Makefile offscreen sdl-win grab-png grab-jpeg h264enc
 
 CFLAGS=-Wall -g3 -I /usr/include/libdrm
 
