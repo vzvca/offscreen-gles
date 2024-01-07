@@ -16,12 +16,15 @@ Code shown here:
 * uses huge code chunks from [libva-utils](https://github.com/intel/libva-utils).
 * uses a tiny TCL interpreter from [picol](https://github.com/dbohdan/picol).
 
-There are 4 distinct programs:
+There are 5 distinct programs:
 
 * **offscreen**: does the rendering and stores the images (RGBA32 pixels) in a memory mapped file (defaults to `/tmp/frame`). Images are generated at a given frame rate (default to 20 fps).
 * **grab-png**: takes a screenshot in PNG by reading the file filled by **offscreen**.
 * **grab-jpeg**: takes a screenshot in JPEG by reading the file filled by **offscreen**. It uses `vaapi` (Video Acceleration API) to delegate JPEG computation to the hardware.
+* **h264enc**: Encode generated frames as an h264 raw video file.
 * **sdl-win**: Read images at a given framerate (default to 20) from the file written by **offscreen** which is memory mapped.
+
+Apart for `sdl-win` it is easier to start `grab-png`, `grab-jpeg` and `h264enc` from `offscreen` (see below).
 
 ## Usage
 
@@ -57,6 +60,14 @@ There is a crude command interface which is based on a tiny TCL interpreter. If 
 
     => 
 
+There are commands for taking snapshots (jpeg and png) and recording video, at `offscreen` prompt enter:
+
+   => png /path/to/capture.png
+   => jpeg /path/to/capture.jpeg
+   => h264enc /path/to/video.h264 1000  ;# will record 1000 video frames
+
+Note that jpeg and h264 use hardware acceleration using VAAPI.
+
 
 ### sdl-win
 
@@ -79,6 +90,7 @@ There is a crude command interface which is based on a tiny TCL interpreter. If 
         -o                        Set output PNG file name (default /tmp/capture.png).
         -w                        Set the width of the image (default 720).
         -h                        Set the height of the image (default 576).
+        -s                        Encode input on SIGUSR1 signal. Wait at most 10 sec for signal.
 
 ### grab-jpeg
 
@@ -91,9 +103,34 @@ There is a crude command interface which is based on a tiny TCL interpreter. If 
         -h                        Set the height of the image (default 576).
         -f                        Set 4CC value 0(I420)/1(NV12)/2(UYVY)/3(YUY2)/4(Y8)/5(RGBA) (default 5).
         -q                        Set quality of the image (default 50).
+        -s                        Encode input on SIGUSR1 signal. Wait at most 10 sec for signal.
+	
     Example: ./grab-jpeg -w 1024 -h 768 -i input_file.yuv -o output.jpeg -f 0 -q 50
 
 For the moment, only 4CC RGBA is supported. But it is not real RGBA, you need to perform rendering in YUV colorspace by entering `colorspace yuv` at `offscreen` command prompt.
+
+### h264enc
+
+    $ ./h264enc -?
+    ./h264encode <options>
+       -w <width> -h <height>
+       -framecount <frame number>
+       -n <frame number>
+	  if set to 0 and srcyuv is set, the frame count is from srcuv file
+       -o <coded file>
+       -f <frame rate>
+       --intra_period <number>
+       --idr_period <number>
+       --ip_period <number>
+       --bitrate <bitrate>
+       --initialqp <number>
+       --minqp <number>
+       --rcmode <NONE|CBR|VBR|VCM|CQP|VBR_CONTRAINED>
+       --srcyuv <filename> load YUV from a file
+       --entropy <0|1>, 1 means cabac, 0 cavlc
+       --profile <BP|MP|HP>
+       --low_power <num> 0: Normal mode, 1: Low power mode, others: auto mode
+
 
 ## Demo
 
