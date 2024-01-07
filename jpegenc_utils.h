@@ -41,6 +41,7 @@
 
 #define BITSTREAM_ALLOCATE_STEPPING     4096
 
+#if 0
 struct __bitstream {
     unsigned int *buffer;
     int bit_offset;
@@ -112,6 +113,9 @@ bitstream_put_ui(bitstream *bs, unsigned int val, int size_in_bits)
         bs->buffer[pos + 1] = val;
     }
 }
+#else
+#include "bitstream.h"
+#endif
 
 //As per Jpeg Spec ISO/IEC 10918-1, below values are assigned
 enum jpeg_markers {

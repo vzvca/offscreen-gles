@@ -27,6 +27,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <errno.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <png.h>
@@ -36,6 +38,7 @@
 #define DEF_INPUT "/tmp/frame"
 #define DEF_OUTPUT "/tmp/capture.png"
 
+int   g_signal = 0;
 int   g_width  = DEF_WIDTH;
 int   g_height = DEF_HEIGHT;
 char *g_input  = DEF_INPUT;
@@ -57,6 +60,7 @@ void usage( int argc, char *argv[], int optind )
    fprintf( stderr, "\t-o\t\tSet output PNG file name (default %s).\n", DEF_OUTPUT);
    fprintf( stderr, "\t-w\t\tSets the width of the image (default %d).\n", DEF_WIDTH);
    fprintf( stderr, "\t-h\t\tSets the height of the image (default %d).\n", DEF_HEIGHT);
+   fprintf (stderr, "\t-s\t\tEncode input on SIGUSR1 signal. Wait at most 10 sec for signal.\n");
   
    /* exit with error only if option parsng failed */
    exit(optind > 0);
@@ -165,6 +169,14 @@ static int save_png(const char *filename, int width, int height,
 }
 
 /* --------------------------------------------------------------------------
+ *   Signal handler
+ * --------------------------------------------------------------------------*/
+void sigusr1 (int dummy)
+{
+  /* nothing */
+}
+
+/* --------------------------------------------------------------------------
  *   Main program
  * --------------------------------------------------------------------------*/
 int main (int argc, char *argv[])
@@ -172,13 +184,14 @@ int main (int argc, char *argv[])
    int opt, fbfd;
    unsigned char *pixels;
    
-   while ( (opt = getopt( argc, argv, "?i:o:w:h")) != -1 ) {
+   while ( (opt = getopt( argc, argv, "?si:o:w:h:")) != -1 ) {
       switch( opt ) {
       case '?':  usage( argc, argv, 0); break;
       case 'i':  g_input = optarg; break;
       case 'o':  g_output = optarg; break;
       case 'w':  g_width = atoi(optarg); break;
       case 'h':  g_height = atoi(optarg); break;
+      case 's':  g_signal = 1; break;
       default:
          usage(argc, argv, optind);
       }
@@ -192,12 +205,27 @@ int main (int argc, char *argv[])
    }
    puts("The output file was opened successfully.");
    pixels = (unsigned char *)mmap(0, g_width*g_height*4, PROT_READ, MAP_SHARED, fbfd, 0);
-   if (*(int*)pixels == -1) {
+   if (pixels == MAP_FAILED) {
       perror("Error: failed to map output file to memory");
       exit(1);
    }
    puts("The output file was mapped to memory successfully.\n");
 
+   if (g_signal) {
+     puts ("Registering signal handler and wait (at most 10 sec) for SIGUSR1.");
+     signal (SIGUSR1, sigusr1);
+     if (usleep (10*1000000) == -1) {
+       if (errno != EINTR) {
+	 perror ("usleep()");
+	 exit (1);
+       }
+       puts("Signal caught!");
+     }
+     else {
+       puts ("Timer expired !");
+     }
+   }
+   
    puts("Saving PNG file");
    save_png(g_output, g_width, g_height, 8, PNG_COLOR_TYPE_RGBA, pixels, g_width*4, PNG_TRANSFORM_IDENTITY);
 

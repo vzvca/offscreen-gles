@@ -47,6 +47,8 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <assert.h>
+#include <signal.h>
+#include <errno.h>
 #include <time.h>
 
 #include <pthread.h>
@@ -107,6 +109,7 @@ void usage( int argc, char *argv[], int optind )
   fprintf (stderr, "\t-h\t\tSets the height of the image (default %d).\n", DEF_HEIGHT);
   fprintf (stderr, "\t-f\t\tSets 4CC value 0(I420)/1(NV12)/2(UYVY)/3(YUY2)/4(Y8)/5(RGBA) (default %d).\n", DEF_FOURCC);
   fprintf (stderr, "\t-q\t\tSets quality of the image (default %d).\n", DEF_QUALITY);
+  fprintf (stderr, "\t-s\t\tEncode input on SIGUSR1 signal. Wait at most 10 sec for signal.\n");
 
   fprintf (stderr, "Example: %s -w 1024 -h 768 -i input_file.yuv -o output.jpeg -f 0 -q 50\n\n", argv[0]);
 
@@ -1011,7 +1014,13 @@ int encode_input_image(FILE *yuv_fp, FILE *jpeg_fp, int picture_width, int pictu
   return 0;
 }
 
-
+/* --------------------------------------------------------------------------
+ *  signal handler
+ * --------------------------------------------------------------------------*/
+void sigusr1 (int dummy)
+{
+  /* nothing */
+}
 
 /*
  * --------------------------------------------------------------------------
@@ -1029,9 +1038,10 @@ int main(int argc, char *argv[])
   unsigned int picture_width = DEF_WIDTH;
   unsigned int picture_height = DEF_HEIGHT;
   unsigned int frame_size = 0;
+  int waitforsig = 0;
   int opt;
   
-  while ( (opt = getopt( argc, argv, "?i:o:w:h:f:q:")) != -1 ) {
+  while ( (opt = getopt( argc, argv, "?si:o:w:h:f:q:")) != -1 ) {
     switch( opt ) {
     case '?':  usage( argc, argv, 0); break;
     case 'i':  g_input = optarg; break;
@@ -1040,6 +1050,7 @@ int main(int argc, char *argv[])
     case 'f':  yuv_type = atoi(argv[5]); break;
     case 'h':  picture_height = atoi(optarg); break;
     case 'q':  quality = atoi(argv[6]); break;
+    case 's':  waitforsig = 1; break;
     default:
       usage(argc, argv, optind);
     }
@@ -1076,6 +1087,19 @@ int main(int argc, char *argv[])
   }
   }
 
+  if (waitforsig) {
+    signal (SIGUSR1, sigusr1);
+    if (usleep (10*1000000) == -1) {
+       if (errno != EINTR) {
+	 perror ("usleep()");
+	 exit (1);
+       }
+    }
+    else {
+      puts ("Timer expired !");
+    }
+  }
+  
   yuv_fp = fopen (g_input, "rb" );
   if (yuv_fp == NULL) {
     perror("Error: cannot open output file");

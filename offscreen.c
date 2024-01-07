@@ -803,6 +803,9 @@ picolResult cmd_help (picolInterp *itp, int argc, const char *argv[], void *pd)
       "mouse ?x y?" "\n"
       "shader ?/path/to/fragment-shader?" "\n"
       "stats" "\n"
+      "width" "\n"
+      "height" "\n"
+      "execbg cmd ?arg1? ... ?argn?" "\n"
       "help ?topic?" "\n"
       "quit ?status?" "\n";
     return result (itp, PICOL_OK, helpmsg);
@@ -851,6 +854,21 @@ picolResult cmd_help (picolInterp *itp, int argc, const char *argv[], void *pd)
     if (!strcmp (argv[1], "stats")) {
       char *helpmsg =
 	"Prints statistics.";
+      return result (itp, PICOL_OK, helpmsg);
+    }
+    if (!strcmp (argv[1], "width")) {
+      char *helpmsg =
+	"Returns current width.";
+      return result (itp, PICOL_OK, helpmsg);
+    }
+    if (!strcmp (argv[1], "height")) {
+      char *helpmsg =
+	"Returns current height.";
+      return result (itp, PICOL_OK, helpmsg);
+    }
+    if (!strcmp (argv[1], "execbg")) {
+      char *helpmsg =
+	"Forks command in background and returns its PID.";
       return result (itp, PICOL_OK, helpmsg);
     }
   }

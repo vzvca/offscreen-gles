@@ -22,11 +22,11 @@ jpegenc.c: jpegenc_utils.h
 	@touch $@
 
 grab-png: Makefile
-grab-jpeg: jpegenc.o va_display_drm.o
-	$(CC) $(CFLAGS) jpegenc.o va_display_drm.o   -o $@ -lva -lva-drm -ldrm
+grab-jpeg: jpegenc.o va_display_drm.o bitstream.o
+	$(CC) $(CFLAGS) jpegenc.o va_display_drm.o bitstream.o -o $@ -lva -lva-drm -ldrm
 
-h264enc: h264encode.o va_display_drm.o
-	$(CC) $(CFLAGS) h264encode.o va_display_drm.o -o $@ -lva -lva-drm -ldrm -lm
+h264enc: h264encode.o va_display_drm.o bitstream.o
+	$(CC) $(CFLAGS) h264encode.o va_display_drm.o bitstream.o -o $@ -lva -lva-drm -ldrm -lm
 
 clean:
 	-rm *o

@@ -6,11 +6,21 @@
 # -----------------------------------------------------------------------------
 #   Takes a picture of current frame
 # -----------------------------------------------------------------------------
-proc image {type fout} {
+proc image {type fout col} {
     set w [width]
     set h [height]
-    set pid [execbg ./grab-$type -w $w -h $h -o $fout]
+    set pid [execbg ./grab-$type -s -w $w -h $h -o $fout]
+    after 100
+    colorspace $col
     kill add $pid
+}
+
+proc png {fout} {
+    image png $fout rgb
+}
+
+proc jpeg {fout} {
+    image jpeg $fout yuv
 }
 
 # -----------------------------------------------------------------------------
@@ -20,8 +30,12 @@ proc video {type fout nframes} {
     set w [width]
     set h [height]
     set fps [fps]
-    set pid [execbg ./h264enc -w $w -h $h -n $nframes -f $fps  -o $fout --rcmode CBR]
-    after 500
+    set pid [execbg ./h264enc -s -w $w -h $h -n $nframes -f $fps  -o $fout --rcmode CBR]
+    after 200
     colorspace yuv
     kill add $pid
+}
+
+proc h264 {fout nframes} {
+   video h264 $fout $nframes
 }

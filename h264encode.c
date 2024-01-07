@@ -50,7 +50,7 @@
         exit(1);                                                        \
     }
 
-#include "bitstream.c"
+#include "bitstream.h"
 #include "loadsurface.h"
 
 #define NAL_REF_IDC_NONE        0
