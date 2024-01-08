@@ -80,9 +80,7 @@
 #define PROFILE_IDC_HIGH        100
 
 
-//#define SURFACE_NUM 1 /* 1 single YUV surface */
 #define SURFACE_NUM 16 /* 16 surfaces for source YUV */
-//#define SURFACE_NUM 16 /* 16 surfaces for reference */
 static  VADisplay va_dpy;
 static  VAProfile h264_profile = ~0;
 static  VAConfigAttrib attrib[VAConfigAttribTypeMax];
@@ -98,7 +96,6 @@ static  VAEncPictureParameterBufferH264 pic_param;
 static  VAEncSliceParameterBufferH264 slice_param;
 static  VAPictureH264 CurrentCurrPic;
 static  VAPictureH264 ReferenceFrames[16], RefPicList0_P[32], RefPicList0_B[32], RefPicList1_B[32];
-//static  VAPictureH264 ReferenceFrames[2], RefPicList0_P[2], RefPicList0_B[2], RefPicList1_B[2];
 
 #define N_REF_FRAMES (sizeof(ReferenceFrames) / sizeof(ReferenceFrames[0]))
 #define N_REF_PICS_LIST0_P (sizeof(RefPicList0_P) / sizeof(RefPicList0_P[0]))
@@ -192,6 +189,7 @@ static VAEntrypoint selected_entrypoint = -1;
  */
 VADisplay va_open_display_drm(void);
 void va_close_display_drm(VADisplay va_dpy);
+void tfnv12 (int w, int h, unsigned char *rgba, unsigned char *y, unsigned char *uv);
 
 
 // -----------------------------------------------------------------------------
@@ -1761,7 +1759,7 @@ void tfnv12 (int w, int h, unsigned char *rgba, unsigned char *y, unsigned char 
   memset (ru, 0, sizeof(ru));
   memset (rv, 0, sizeof(rv));
 
-  for (l = 0; l < h; ++l) {
+  for (l = 1; l <= h; ++l) {
     prgba = rgba + (h-l)*w*4;
     for (c = 0; c < w; ++c) {
       // original 4 bytes pixels are YUVA
@@ -1770,7 +1768,7 @@ void tfnv12 (int w, int h, unsigned char *rgba, unsigned char *y, unsigned char 
       rv[c>>1] += *prgba++;
       prgba++;
     }
-    if (l & 0x01) {
+    if ((l & 0x01) == 0) {
       for (c = 0; c < ww; ++c) {
         *puv++ = (unsigned char) (ru[c] >> 2) & 0xff;
         *puv++ = (unsigned char) (rv[c] >> 2) & 0xff;
