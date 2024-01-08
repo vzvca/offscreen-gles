@@ -62,9 +62,9 @@ There is a crude command interface which is based on a tiny TCL interpreter. If 
 
 There are commands for taking snapshots (jpeg and png) and recording video, at `offscreen` prompt enter:
 
-   => png /path/to/capture.png
-   => jpeg /path/to/capture.jpeg
-   => h264enc /path/to/video.h264 1000  ;# will record 1000 video frames
+    => png /path/to/capture.png
+    => jpeg /path/to/capture.jpeg
+    => h264enc /path/to/video.h264 1000  ;# will record 1000 video frames
 
 Note that jpeg and h264 use hardware acceleration using VAAPI.
 
