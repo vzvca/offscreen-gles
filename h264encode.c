@@ -731,7 +731,6 @@ static int print_help(void)
     printf("   -w <width> -h <height>\n");
     printf("   -framecount <frame number>\n");
     printf("   -n <frame number>\n");
-    printf("      if set to 0 and srcyuv is set, the frame count is from srcuv file\n");
     printf("   -o <coded file>\n");
     printf("   -f <frame rate>\n");
     printf("   --intra_period <number>\n");
@@ -908,11 +907,11 @@ static int process_cmdline(int argc, char *argv[])
     if (coded_fn == NULL) {
         struct stat buf;
         if (stat("/tmp", &buf) == 0)
-            coded_fn = strdup("/tmp/test.264");
+            coded_fn = strdup("/tmp/test.h264");
         else if (stat("/sdcard", &buf) == 0)
-            coded_fn = strdup("/sdcard/test.264");
+            coded_fn = strdup("/sdcard/test.h264");
         else
-            coded_fn = strdup("./test.264");
+            coded_fn = strdup("./test.h264");
 
         assert(coded_fn);
     }
@@ -1717,7 +1716,7 @@ static int save_codeddata(unsigned long long display_order, unsigned long long e
 
     printf("\r      "); /* return back to startpoint */
     printf ("%c", progress[encode_order % 4]);
-    printf ("%5s", get_frame_type (current_frame_type));
+    printf ("%-5s", get_frame_type (current_frame_type));
     printf("%08lld", encode_order);
     printf("(%06d bytes coded)", coded_size);
     fflush (stdout);
@@ -1832,7 +1831,7 @@ static void waitforimage ()
 // -----------------------------------------------------------------------------
 static int encode_loop ()
 {
-  unsigned int i, tmp;
+  unsigned int tmp;
   VAStatus va_status;
   
   for (current_frame_encoding = 0; current_frame_encoding < frame_count; current_frame_encoding++) {

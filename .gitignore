@@ -3,7 +3,11 @@ sdl-win
 grab-png
 grab-jpeg
 h264enc
+h265enc
 tstsig*
 *~
 *.o
+*.h264
+*.h265
 *.264
+*.265
