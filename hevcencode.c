@@ -469,17 +469,19 @@ static  double frame_size = 0;
 static  int initial_qp = 26;
 static  int minimal_qp = 0;
 static  int intra_period = 30;
-static  int intra_idr_period = 60;
+static  int intra_idr_period = 30;
+//static  int intra_idr_period = 60;
 static  int ip_period = 1;
 static  int rc_mode = -1;
-static  int rc_default_modes[] = {
-				  VA_RC_VBR,
-				  VA_RC_CQP,
-				  VA_RC_VBR_CONSTRAINED,
-				  VA_RC_CBR,
-				  VA_RC_VCM,
-				  VA_RC_NONE,
-};
+static  int rc_default_modes[] =
+  {
+   VA_RC_VBR,
+   VA_RC_CQP,
+   VA_RC_VBR_CONSTRAINED,
+   VA_RC_CBR,
+   VA_RC_VCM,
+   VA_RC_NONE,
+  };
 static  unsigned long long current_frame_encoding = 0;
 static  unsigned long long current_frame_display = 0;
 static  unsigned long long current_IDR_display = 0;
@@ -2868,9 +2870,9 @@ static int save_codeddata(unsigned long long display_order, unsigned long long e
   printf ("%c", progress[encode_order % 4]);
   printf ("%-5s", get_frame_type (current_frame_type));
   printf ("%08lld", encode_order);
-  printf ("(%06d bytes coded)\n", coded_size);
-
-  fflush(coded_fp);
+  printf ("(%06d bytes coded)", coded_size);
+  fflush (stdout);
+  fflush (coded_fp);
 
   return 0;
 }

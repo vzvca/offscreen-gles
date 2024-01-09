@@ -139,14 +139,15 @@ static  int intra_idr_period = 30;
 //static  int intra_idr_period = 60;
 static  int ip_period = 1;
 static  int rc_mode = -1;
-static  int rc_default_modes[] = {
-    VA_RC_VBR,
-    VA_RC_CQP,
-    VA_RC_VBR_CONSTRAINED,
-    VA_RC_CBR,
-    VA_RC_VCM,
-    VA_RC_NONE,
-};
+static  int rc_default_modes[] =
+  {
+   VA_RC_VBR,
+   VA_RC_CQP,
+   VA_RC_VBR_CONSTRAINED,
+   VA_RC_CBR,
+   VA_RC_VCM,
+   VA_RC_NONE,
+  };
 static  unsigned long long current_frame_encoding = 0;
 static  unsigned long long current_frame_display = 0;
 static  unsigned long long current_IDR_display = 0;

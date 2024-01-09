@@ -16,15 +16,16 @@ Code shown here:
 * uses huge code chunks from [libva-utils](https://github.com/intel/libva-utils).
 * uses a tiny TCL interpreter from [picol](https://github.com/dbohdan/picol).
 
-There are 5 distinct programs:
+There are 6 distinct programs:
 
 * **offscreen**: does the rendering and stores the images (RGBA32 pixels) in a memory mapped file (defaults to `/tmp/frame`). Images are generated at a given frame rate (default to 20 fps).
 * **grab-png**: takes a screenshot in PNG by reading the file filled by **offscreen**.
 * **grab-jpeg**: takes a screenshot in JPEG by reading the file filled by **offscreen**. It uses `vaapi` (Video Acceleration API) to delegate JPEG computation to the hardware.
 * **h264enc**: Encode generated frames as an h264 raw video file.
+* **h265enc**: Encode generated frames as an h265 raw video file.
 * **sdl-win**: Read images at a given framerate (default to 20) from the file written by **offscreen** which is memory mapped.
 
-Apart for `sdl-win` it is easier to start `grab-png`, `grab-jpeg` and `h264enc` from `offscreen` (see below).
+Apart for `sdl-win` it is easier to start `grab-png`, `grab-jpeg`, `h264enc` and `h265enc` from `offscreen` (see below).
 
 ## Usage
 
@@ -49,24 +50,29 @@ There is a crude command interface which is based on a tiny TCL interpreter. If 
     offscreen renderer cli. Type 'help' to see available commands.
     => help
     colorspace ?rgb/yuv?
+    execbg command ?arg1? ... ?argn?
     fps ?frame-per-second?
     kill ?add/rm pid?
     message ?msg?
     mouse ?x y?
     shader ?/path/to/fragment-shader?
     stats
+    width
+    height
     help ?topic?
     quit ?status?
 
-    => 
+    => help fps
+    With no argument, returns current video framerate. Otherwise sets framerate according to argument. Valid values are integer between 1 and 100.
 
 There are commands for taking snapshots (jpeg and png) and recording video, at `offscreen` prompt enter:
 
     => png /path/to/capture.png
     => jpeg /path/to/capture.jpeg
-    => h264enc /path/to/video.h264 1000  ;# will record 1000 video frames
+    => h264enc /path/to/video.264 1000  ;# will record 1000 video frames
+    => h265enc /path/to/video.265 1000  ;# will record 1000 video frames
 
-Note that jpeg and h264 use hardware acceleration using VAAPI.
+Note that jpeg, h264 and h265 use hardware acceleration using VAAPI.
 
 
 ### sdl-win
@@ -130,6 +136,29 @@ For the moment, only 4CC RGBA is supported. But it is not real RGBA, you need to
        --entropy <0|1>, 1 means cabac, 0 cavlc
        --profile <BP|MP|HP>
        --low_power <num> 0: Normal mode, 1: Low power mode, others: auto mode
+
+### h265enc
+
+    $ ./h265enc -?
+    ./hevcencode <options>
+       -w <width> -h <height>
+       -framecount <frame number>
+       -n <frame number>
+       -o <coded file>
+       -f <frame rate>
+       --intra_period <number>
+       --idr_period <number>
+       --ip_period <number>
+       --bitrate <bitrate> Kbits per second
+       --initialqp <number>
+       --minqp <number>
+       --rcmode <NONE|CBR|VBR|VCM|CQP|VBR_CONTRAINED>
+       --syncmode: sequentially upload source, encoding, save result, no multi-thread
+       --srcyuv <filename> load YUV from a file
+       --fourcc <NV12|IYUV|YV12> source YUV fourcc
+       --profile 1: main 2 : main10
+       --p2b 1: enable 0 : disalbe(defalut)
+       --lowpower 1: enable 0 : disalbe(defalut)
 
 
 ## Demo

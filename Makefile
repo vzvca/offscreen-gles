@@ -32,7 +32,7 @@ h264enc: h264encode.o va_display_drm.o bitstream.o
 h265enc: Makefile
 h265enc: loadsurface.h bitstream.h
 h265enc: hevcencode.o va_display_drm.o bitstream.o
-	$(CC) $(CFLAGS) h264encode.o va_display_drm.o bitstream.o -o $@ -lva -lva-drm -ldrm -lm
+	$(CC) $(CFLAGS) hevcencode.o va_display_drm.o bitstream.o -o $@ -lva -lva-drm -ldrm -lpthread -lm
 
 clean:
 	-rm *o

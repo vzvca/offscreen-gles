@@ -828,7 +828,7 @@ picolResult cmd_help (picolInterp *itp, int argc, const char *argv[], void *pd)
     }
     if (!strcmp (argv[1], "fps")) {
       char *helpmsg =
-	"With no argument, returns current video framerate. Otherwise sets framerate according to argument. Valud values are integer between 1 and 100.";
+	"With no argument, returns current video framerate. Otherwise sets framerate according to argument. Valid values are integer between 1 and 100.";
       return result (itp, PICOL_OK, helpmsg);
     }
     if (!strcmp (argv[1], "kill")) {

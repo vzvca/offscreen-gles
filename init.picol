@@ -30,7 +30,7 @@ proc video {type fout nframes} {
     set w [width]
     set h [height]
     set fps [fps]
-    set pid [execbg ./h264enc -w $w -h $h -n $nframes -f $fps  -o $fout --rcmode CBR]
+    set pid [execbg ./${type}enc -w $w -h $h -n $nframes -f $fps  -o $fout --rcmode CBR]
     after 200
     colorspace yuv
     kill add $pid
@@ -38,4 +38,8 @@ proc video {type fout nframes} {
 
 proc h264 {fout nframes} {
    video h264 $fout $nframes
+}
+
+proc h265 {fout nframes} {
+   video h265 $fout $nframes
 }

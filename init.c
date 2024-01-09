@@ -31,7 +31,7 @@ char *inititp =
 "    set w [width]\n"
 "    set h [height]\n"
 "    set fps [fps]\n"
-"    set pid [execbg ./h264enc -w $w -h $h -n $nframes -f $fps  -o $fout --rcmode CBR]\n"
+"    set pid [execbg ./${type}enc -w $w -h $h -n $nframes -f $fps  -o $fout --rcmode CBR]\n"
 "    after 200\n"
 "    colorspace yuv\n"
 "    kill add $pid\n"
@@ -39,5 +39,9 @@ char *inititp =
 "\n"
 "proc h264 {fout nframes} {\n"
 "   video h264 $fout $nframes\n"
+"}\n"
+"\n"
+"proc h265 {fout nframes} {\n"
+"   video h265 $fout $nframes\n"
 "}\n"
 ;
