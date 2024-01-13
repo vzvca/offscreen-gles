@@ -311,14 +311,21 @@ To circumvent this issue, you need to help mesa to choose the right libray to lo
 
     export MESA_LOADER_DRIVER_OVERRIDE=i965
 
-It is possible to use `sdl-win` too. It has been tested using `MobaXterm X11 server` with moba version 21.2, the following server modes works (others don't):
+
+`grab-png` which does not rely on graphic hardware (doesn't use `/dev/dri/renderD128`) works out of the box.
+
+WSL2 has a builtin graphical wayland based backend named `wslg` which can be used to run X11 program. `sdl-win` wasn't working on it at the tie of writing. It worked and has been tested using `MobaXterm X11 server` with moba version 21.2, the following server modes works (others don't):
 
 * "Windowed mode": X11 server constrained to a single container window
 * "Windowed mode with DWM": X11 server with DWM desktop in a container window
 * "Windowed mode with Tvwm desktop": X11 server and Fvwm desktop in a container window
 * "Rootless": Transparent X11 server with Fvwm window borders (experimantal)
 
-`grab-png` works out of the box.
+
+For MobaXTerm X11 server to work package `xauth` must be installed and environment variable `XAUTHORITY` needs to be defined:
+
+   $ export XAUTHORITY=/home/wsluser/.Xauthority
+
 
 
 ## VAAPI video encoding
