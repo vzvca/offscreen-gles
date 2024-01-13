@@ -98,6 +98,14 @@ Note that jpeg, h264 and h265 use hardware acceleration using VAAPI.
         -h                        Set the height of the image (default 576).
         -s                        Encode input on SIGUSR1 signal. Wait at most 10 sec for signal.
 
+It is easier to start `grab-png` from `offscreen` using the `png` command like this:
+
+    $ ./offscreen
+    ==> png /path/to/capture.png
+    ==> quit
+
+It will start `grab-png`, change colorspace to RGB, send a SIGUSR1 signal to `grab-jpeg` process.
+
 ### grab-jpeg
 
     $ ./grab-jpeg -?
@@ -112,6 +120,14 @@ Note that jpeg, h264 and h265 use hardware acceleration using VAAPI.
         -s                        Encode input on SIGUSR1 signal. Wait at most 10 sec for signal.
 	
     Example: ./grab-jpeg -w 1024 -h 768 -i input_file.yuv -o output.jpeg -f 0 -q 50
+
+It is easier to start `grab-jpeg` from `offscreen` using the `png` command like this:
+
+    $ ./offscreen
+    ==> jpeg /path/to/capture.jpeg
+    ==> quit
+
+It will start `grab-jpeg`, change colorspace to YUV, send a SIGUSR1 signal to `grab-jpeg` process.
 
 For the moment, only 4CC RGBA is supported. But it is not real RGBA, you need to perform rendering in YUV colorspace by entering `colorspace yuv` at `offscreen` command prompt.
 
@@ -137,6 +153,61 @@ For the moment, only 4CC RGBA is supported. But it is not real RGBA, you need to
        --profile <BP|MP|HP>
        --low_power <num> 0: Normal mode, 1: Low power mode, others: auto mode
 
+It is easier to start `h264enc` from `offscreen` using the `h264` command like this:
+
+    $ ./offscreen
+    ==> h264 /path/to/video.h264 1000  ;# will record 1000 video frames
+
+    INPUT:Try to encode H264...
+    INPUT: RateControl  : CBR
+    INPUT: Resolution   : 720x576, 1000 frames
+    INPUT: FrameRate    : 20
+    INPUT: Bitrate      : 1990656
+    INPUT: Slices       : 1
+    INPUT: IntraPeriod  : 30
+    INPUT: IDRPeriod    : 30
+    INPUT: IpPeriod     : 1
+    INPUT: Initial QP   : 26
+    INPUT: Min QP       : 0
+    INPUT: Source YUV   : /tmp/frame (fourcc NV12)
+    INPUT: Coded Clip   : /path/to/video.h264
+
+
+    libva info: VA-API version 1.4.0
+    libva info: va_getDriverName() returns 0
+    libva info: Trying to open /usr/lib/x86_64-linux-gnu/dri/i965_drv_video.so
+    libva info: Found init function __vaDriverInit_1_4
+    libva info: va_openDriver() returns 0
+    Using EntryPoint - 6 
+    Use profile VAProfileH264High
+    Support rate control mode (0x96):CBR VBR CQP 
+    Support VAConfigAttribEncPackedHeaders
+    Support packed sequence headers
+    Support packed picture headers
+    Support packed slice headers
+    Support packed misc headers
+    Support 4 RefPicList0 and 1 RefPicList1
+    Support 32 slices
+    Support VAConfigAttribEncSliceStructure
+    Support VA_ENC_SLICE_STRUCTURE_ARBITRARY_MACROBLOCKS
+	  \P    00000999(007333 bytes coded)
+
+    PERFORMANCE:   Frame Rate           : 19.66 fps (1000 frames, 50868 ms (50.87 ms per frame))
+    PERFORMANCE:   Compression ratio    : 73:1
+    PERFORMANCE:     Processing         : 12138 ms (12.14, 23.86% percent)
+    PERFORMANCE:     UploadPicture      : 346 ms (0.35, 0.68% percent)
+    PERFORMANCE:     vaBeginPicture     : 6 ms (0.01, 0.01% percent)
+    PERFORMANCE:     vaRenderHeader     : 45 ms (0.04, 0.09% percent)
+    PERFORMANCE:     vaEndPicture       : 2130 ms (2.13, 4.19% percent)
+    PERFORMANCE:     vaSyncSurface      : 860 ms (0.86, 1.69% percent)
+    PERFORMANCE:     SavePicture        : 183 ms (0.18, 0.36% percent)
+    PERFORMANCE:     Others             : 47298 ms (47.30, 92.98% percent)
+
+    ==> quit
+
+It will start `h264enc`, change colorspace to YUV, send a SIGUSR1 signal to `h264enc` process after each new frame is ready.
+
+
 ### h265enc
 
     $ ./h265enc -?
@@ -160,6 +231,8 @@ For the moment, only 4CC RGBA is supported. But it is not real RGBA, you need to
        --p2b 1: enable 0 : disalbe(defalut)
        --lowpower 1: enable 0 : disalbe(defalut)
 
+It is easier to start `h265enc` from `offscreen` using the `h265` like `h264` command does for `h264enc`.
+
 
 ## Demo
 
@@ -181,6 +254,35 @@ Type `help` to see the list of available commands and `help <<command>>` to get 
 
 Framerate and shader can be changed dynamically using `fps` and `shader` command.
 The message printed on the video can be changed using `message` command.
+
+## Gallery
+
+### Plasma
+![plasma shader](images/plasma.png)
+
+### Circles
+![circles shader](images/circles.png)
+
+### City
+![city shader](images/city.png)
+
+### Cues
+![cues shader](images/cues.png)
+
+### eurotunnel
+![eurotunnel shader](images/eurotunnel.png)
+
+### nested
+![nested shader](images/nested.png)
+
+### pavage
+![pavage shader](images/pavage.png)
+
+### pipes
+![pipes shader](images/pipes.png)
+
+### stars
+![stars shader](images/stars.png)
 
 
 ## Building
