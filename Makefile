@@ -1,7 +1,9 @@
 
-all: Makefile offscreen sdl-win grab-png grab-jpeg h264enc h265enc
+all: Makefile offscreen sdl-win grab-png grab-jpeg h264enc h265enc h264streamer
 
 CFLAGS=-Wall -g3 -I /usr/include/libdrm
+
+CFLAGS_LIVE555=-Wall -g3 `pkg-config --cflags --libs live555`
 
 init.c: init.picol
 	awk 'BEGIN {print "char *inititp ="} {print "\"" $$0 "\\n\""} END {print ";"}' < $< > $@
@@ -33,6 +35,10 @@ h265enc: Makefile
 h265enc: loadsurface.h bitstream.h
 h265enc: hevcencode.o va_display_drm.o bitstream.o
 	$(CC) $(CFLAGS) hevcencode.o va_display_drm.o bitstream.o -o $@ -lva -lva-drm -ldrm -lpthread -lm
+
+h264streamer: Makefile
+h264streamer: h264VideoStreamer.cpp
+	$(CXX) $(CFLAGS_LIVE555) $< -o $@
 
 clean:
 	-rm *o

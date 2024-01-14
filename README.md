@@ -16,13 +16,14 @@ Code shown here:
 * uses huge code chunks from [libva-utils](https://github.com/intel/libva-utils).
 * uses a tiny TCL interpreter from [picol](https://github.com/dbohdan/picol).
 
-There are 6 distinct programs:
+There are 7 distinct programs:
 
 * **offscreen**: does the rendering and stores the images (RGBA32 pixels) in a memory mapped file (defaults to `/tmp/frame`). Images are generated at a given frame rate (default to 20 fps).
 * **grab-png**: takes a screenshot in PNG by reading the file filled by **offscreen**.
 * **grab-jpeg**: takes a screenshot in JPEG by reading the file filled by **offscreen**. It uses `vaapi` (Video Acceleration API) to delegate JPEG computation to the hardware.
 * **h264enc**: Encode generated frames as an h264 raw video file.
 * **h265enc**: Encode generated frames as an h265 raw video file.
+* **h264streamer**: Create RTSP server and RTP streams h264 raw video file. Used to stream output of **h264enc**
 * **sdl-win**: Read images at a given framerate (default to 20) from the file written by **offscreen** which is memory mapped.
 
 Apart for `sdl-win` it is easier to start `grab-png`, `grab-jpeg`, `h264enc` and `h265enc` from `offscreen` (see below).
@@ -234,6 +235,71 @@ It will start `h264enc`, change colorspace to YUV, send a SIGUSR1 signal to `h26
 It is easier to start `h265enc` from `offscreen` using the `h265` like `h264` command does for `h264enc`.
 
 
+### h264streamer
+
+    $ ./h264streamer -h
+    usage: ./h264streamer [-i /path/to/file] [-s stream-name]
+	-?                        Print this help message.
+	-i /path/to/file          Path to input raw h264 vide file. Defaults to 'test.h264'.
+	-s stream-name            Name of stream used for RTSP URL. Defaults to 'testStream
+
+This program can stream an h264 elementary stream (sequence of NAL units) generated using **h264enc**.
+
+Using a FIFO (named pipe created with `mkfifo` as output of **h264enc** and as input of **h264streamer** a realtime h264-encoder-streamer pipeline is created. This is what does the offscreen command `h264stream`.
+
+    $ ./offscreen 
+    The output file was opened successfully.
+    The output file was mapped to memory successfully.
+    offscreen renderer cli. Type 'help' to see available commands.
+    => h264stream 10000
+
+
+    INPUT:Try to encode H264...
+    INPUT: RateControl  : CBR
+    INPUT: Resolution   : 720x576, 10000 frames
+    INPUT: FrameRate    : 20
+    INPUT: Bitrate      : 1990656
+    INPUT: Slices       : 1
+    INPUT: IntraPeriod  : 30
+    INPUT: IDRPeriod    : 30
+    INPUT: IpPeriod     : 1
+    INPUT: Initial QP   : 26
+    INPUT: Min QP       : 0
+    INPUT: Source YUV   : /tmp/frame (fourcc NV12)
+    INPUT: Coded Clip   : /tmp/h264fifo
+
+
+    libva info: VA-API version 1.4.0
+    libva info: va_getDriverName() returns 0
+    libva info: Trying to open /usr/lib/x86_64-linux-gnu/dri/i965_drv_video.so
+    libva info: Found init function __vaDriverInit_1_4
+    libva info: va_openDriver() returns 0
+    Using EntryPoint - 6 
+    Use profile VAProfileH264High
+    Support rate control mode (0x96):CBR VBR CQP 
+    Support VAConfigAttribEncPackedHeaders
+    Support packed sequence headers
+    Support packed picture headers
+    Support packed slice headers
+    Support packed misc headers
+    Support 4 RefPicList0 and 1 RefPicList1
+    Support 32 slices
+    Support VAConfigAttribEncSliceStructure
+    Support VA_ENC_SLICE_STRUCTURE_ARBITRARY_MACROBLOCKS
+    --------------------------------------------
+    Note RTSP URL below to play stream
+    --------------------------------------------
+    --------------------------------------------
+    => Play this stream using the URL "rtsp://192.168.1.30:8554/h264"
+    Beginning streaming...
+    Beginning to read from file...
+	  \P    00000279(011028 bytes coded)
+
+Note the name of the coded video which is actually a FIFO `/tmp/h264fifo`.
+
+To view the stream use `vlc rtsp://192.168.1.30:8554/h264`. VLC will buffer the stream for about 1 second resulting in a 1 second delay.
+
+
 ## Demo
 
 In a first terminal run `offscreen`:
@@ -340,8 +406,8 @@ For `i965` driver, the following package from `non-free` section needs to be ins
 
 * Add circular buffer of frames. At least 2.
 * Add RTP raw video streaming as an external program which consumes frames (like `sdl-win` and `grap-png`).
-* Add H264/H265 video RTP streaming backend using `ffmpeg` or `x264` + `live555` or `vaapi` + `live555`.
-
+* Add H264/H265 video RTP streaming backend using `vaapi` + `live555`  ==> WORK in PROGRESS
+* Add an SDL based hardware accelerated video decoder.
 
 
 
