@@ -3,8 +3,10 @@
 These examples programs show:
 
 * how to do OpenGL/GLES rendering without any windowing system,
-* how to retrieve the video and play it in a window
-* how to take video snapshots in PNG or JPEG. For JPEG it uses hardware acceleration for picture encoding.
+* how to retrieve the video and play it in a window,
+* how to take video snapshots in PNG or JPEG. For JPEG it uses hardware acceleration for picture encoding,
+* how to encode video in h264 and h265 on the fly using hardware acceleration,
+* how to stream encoded video
 
 Should work on headless system provided that `/dev/dri/renderD128` device exists.
 
@@ -245,13 +247,13 @@ It is easier to start `h265enc` from `offscreen` using the `h265` like `h264` co
 
 This program can stream an h264 elementary stream (sequence of NAL units) generated using **h264enc**.
 
-Using a FIFO (named pipe created with `mkfifo` as output of **h264enc** and as input of **h264streamer** a realtime h264-encoder-streamer pipeline is created. This is what does the offscreen command `h264stream`.
+Using a FIFO (named pipe created with `mkfifo` as output of **h264enc** and as input of **h264streamer** a 'realtime' h264-encoder-streamer pipeline is created. This is what does the offscreen command `h264stream`.
 
     $ ./offscreen 
     The output file was opened successfully.
     The output file was mapped to memory successfully.
     offscreen renderer cli. Type 'help' to see available commands.
-    => h264stream 10000
+    => h264stream 10000  ;# will stream 10000 frames
 
 
     INPUT:Try to encode H264...
@@ -298,6 +300,18 @@ Using a FIFO (named pipe created with `mkfifo` as output of **h264enc** and as i
 Note the name of the coded video which is actually a FIFO `/tmp/h264fifo`.
 
 To view the stream use `vlc rtsp://192.168.1.30:8554/h264`. VLC will buffer the stream for about 1 second resulting in a 1 second delay.
+
+The video pipeline has 3 processes:
+
+* `offscreen`
+* `h264enc`
+* `h264streamer`
+
+`offscreen` and `h264enc` mmap the same file which contains a YUV image. `offscreen` signals (SIGUSR1) `h264enc` each time a new image is ready. `offscreen` sets the pace of the pipeline.
+
+`h264enc` and `h264stream` communicate using a FIFO. `h264stream` reads data from the FIFO blocking if no data is available. `h264enc` writes data in the FIFO at the pace fixed by `offscreen`.
+
+**TODO**: evaluate latency of the pipeline.
 
 
 ## Demo
