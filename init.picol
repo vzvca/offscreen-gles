@@ -60,3 +60,20 @@ proc h264stream {nframes} {
      execbg ./h264streamer -s h264 -i /tmp/h264fifo
      puts {--------------------------------------------}
 }
+
+# -----------------------------------------------------------------------------
+#   Video streaming
+# -----------------------------------------------------------------------------
+proc h265stream {nframes} {
+     execbg rm -f /tmp/h265fifo
+     execbg mkfifo /tmp/h265fifo
+     after 100
+     
+     h265 /tmp/h265fifo $nframes
+
+     puts {--------------------------------------------}
+     puts {Note RTSP URL below to play stream}
+     puts {--------------------------------------------}
+     execbg ./h265streamer -s h265 -i /tmp/h265fifo
+     puts {--------------------------------------------}
+}
