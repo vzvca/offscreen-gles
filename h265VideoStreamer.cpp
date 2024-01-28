@@ -18,15 +18,16 @@ along with this library; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 **********/
 // Copyright (c) 1996-2018, Live Networks, Inc.  All rights reserved
-// A test program that reads a H.264 Elementary Stream video file
+// A test program that reads a H.265 Elementary Stream video file
 // and streams it using RTP
 // main program
 //
-// NOTE: For this application to work, the H.264 Elementary Stream video file *must* contain SPS and PPS NAL units,
-// ideally at or near the start of the file.  These SPS and PPS NAL units are used to specify 'configuration' information
-// that is set in the output stream's SDP description (by the RTSP server that is built in to this application).
-// Note also that - unlike some other "*Streamer" demo applications - the resulting stream can be received only using a
-// RTSP client (such as "openRTSP")
+// NOTE: For this application to work, the H.265 Elementary Stream video file *must* contain
+// VPS, SPS and PPS NAL units, ideally at or near the start of the file.
+// These VPS, SPS and PPS NAL units are used to specify 'configuration' information that is set in
+// the output stream's SDP description (by the RTSP server that is built in to this application).
+// Note also that - unlike some other "*Streamer" demo applications - the resulting stream can be
+// received only using a RTSP client (such as "openRTSP")
 
 #include <liveMedia.hh>
 #include <BasicUsageEnvironment.hh>
@@ -34,13 +35,13 @@ along with this library; if not, write to the Free Software Foundation, Inc.,
 
 #include <unistd.h>
 
-#define DEF_INPUT "test.h264"
+#define DEF_INPUT "test.h265"
 #define DEF_STREAM "testStream"
 
 UsageEnvironment* env;
-const char *inputFileName = DEF_INPUT;
+char const* inputFileName = DEF_INPUT;
 const char *streamName = DEF_STREAM;
-H264VideoStreamFramer* videoSource;
+H265VideoStreamFramer* videoSource;
 RTPSink* videoSink;
 
 void play(); // forward
@@ -54,7 +55,7 @@ void usage (int argc, char **argv, int optind)
   const char *fmt =
     "%s: %s [-i /path/to/file] [-s stream-name]\n"
     "    -?                        Print this help message.\n"
-    "    -i /path/to/file          Path to input raw h264 video file. Defaults to '%s'.\n"
+    "    -i /path/to/file          Path to input raw h265 video file. Defaults to '%s'.\n"
     "    -s stream-name            Name of stream used for RTSP URL. Defaults to '%s'\n";
 
   fprintf (stderr, fmt, what, argv[0], DEF_INPUT, DEF_STREAM);
@@ -100,17 +101,17 @@ int main(int argc, char** argv) {
 
   const Port rtpPort(rtpPortNum);
   const Port rtcpPort(rtcpPortNum);
-
-  parse (argc, argv);
   
+  parse (argc, argv);
+
   Groupsock rtpGroupsock(*env, destinationAddress, rtpPort, ttl);
   rtpGroupsock.multicastSendOnly(); // we're a SSM source
   Groupsock rtcpGroupsock(*env, destinationAddress, rtcpPort, ttl);
   rtcpGroupsock.multicastSendOnly(); // we're a SSM source
 
-  // Create a 'H264 Video RTP' sink from the RTP 'groupsock':
+  // Create a 'H265 Video RTP' sink from the RTP 'groupsock':
   OutPacketBuffer::maxSize = 100000;
-  videoSink = H264VideoRTPSink::createNew(*env, &rtpGroupsock, 96);
+  videoSink = H265VideoRTPSink::createNew(*env, &rtpGroupsock, 96);
 
   // Create (and start) a 'RTCP instance' for this RTP sink:
   const unsigned estimatedSessionBandwidth = 500; // in kbps; for RTCP b/w share
@@ -132,7 +133,7 @@ int main(int argc, char** argv) {
   }
   ServerMediaSession* sms
     = ServerMediaSession::createNew(*env, streamName, inputFileName,
-		   "Session streamed by \"testH264VideoStreamer\"",
+		   "Session streamed by \"testH265VideoStreamer\"",
 					   True /*SSM*/);
   sms->addSubsession(PassiveServerMediaSubsession::createNew(*videoSink, rtcp));
   rtspServer->addServerMediaSession(sms);
@@ -155,6 +156,8 @@ void afterPlaying(void* /*clientData*/) {
   videoSink->stopPlaying();
   Medium::close(videoSource);
   // Note that this also closes the input file that this source read from.
+
+  // Start playing once again:
   play();
 }
 
@@ -171,7 +174,7 @@ void play() {
   FramedSource* videoES = fileSource;
 
   // Create a framer for the Video Elementary Stream:
-  videoSource = H264VideoStreamFramer::createNew(*env, videoES);
+  videoSource = H265VideoStreamFramer::createNew(*env, videoES);
 
   // Finally, start playing:
   *env << "Beginning to read from file...\n";

@@ -5,6 +5,7 @@ grab-jpeg
 h264enc
 h265enc
 h264streamer
+h265streamer
 tstsig*
 *~
 *.o

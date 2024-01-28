@@ -1,5 +1,5 @@
 
-all: Makefile offscreen sdl-win grab-png grab-jpeg h264enc h265enc h264streamer
+all: Makefile offscreen sdl-win grab-png grab-jpeg h264enc h265enc h264streamer h265streamer
 
 CFLAGS=-Wall -g3 -I /usr/include/libdrm
 
@@ -40,6 +40,10 @@ h264streamer: Makefile
 h264streamer: h264VideoStreamer.cpp
 	$(CXX) $(CFLAGS_LIVE555) $< -o $@
 
+h265streamer: Makefile
+h265streamer: h265VideoStreamer.cpp
+	$(CXX) $(CFLAGS_LIVE555) $< -o $@
+
 clean:
 	-rm *o
 	-rm -f offscreen
@@ -48,5 +52,7 @@ clean:
 	-rm -f grab-jpeg
 	-rm -f h264enc
 	-rm -f h265enc
+	-rm -f h264streamer
+	-rm -f h265streamer
 
 .PHONY: clean

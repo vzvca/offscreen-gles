@@ -26,9 +26,10 @@ There are 7 distinct programs:
 * **h264enc**: Encode generated frames as an h264 raw video file.
 * **h265enc**: Encode generated frames as an h265 raw video file.
 * **h264streamer**: Create RTSP server and RTP streams h264 raw video file. Used to stream output of **h264enc**
+* **h265streamer**: Create RTSP server and RTP streams h264 raw video file. Used to stream output of **h265enc**
 * **sdl-win**: Read images at a given framerate (default to 20) from the file written by **offscreen** which is memory mapped.
 
-Apart for `sdl-win` it is easier to start `grab-png`, `grab-jpeg`, `h264enc` and `h265enc` from `offscreen` (see below).
+Apart for `sdl-win` it is easier to start `grab-png`, `grab-jpeg`, `h264enc`, `h265enc`, `h264streamer` and `h265streamer` from `offscreen` (see below).
 
 ## Usage
 
@@ -313,6 +314,17 @@ The video pipeline has 3 processes:
 
 **TODO**: evaluate latency of the pipeline.
 
+### h265streamer
+
+    $ ./h265streamer -h
+    usage: ./h265streamer [-i /path/to/file] [-s stream-name]
+	-?                        Print this help message.
+	-i /path/to/file          Path to input raw h265 video file. Defaults to 'test.h264'.
+	-s stream-name            Name of stream used for RTSP URL. Defaults to 'testStream
+
+This program can stream an h265 elementary stream (sequence of NAL units) generated using **h265enc**.
+
+See `h264streamer` section.
 
 ## Demo
 
